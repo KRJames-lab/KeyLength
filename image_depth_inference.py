@@ -5,6 +5,7 @@ import argparse
 import os
 from typing import Tuple, List, Dict
 import json
+import sys
 
 from utils import PoseVisualizer, KeypointFilter, ImagePreprocessor, DepthProcessor
 
@@ -127,7 +128,7 @@ class ImageDepthPoseInference:
         
         Args:
             dataset_path (str): Dataset directory path
-            output_dir (str): Output directory for results
+            output_dir (str): Output directory path (default: ./output)
             details (bool): Whether to print detailed keypoint information
         """
         # Extract input directory name
@@ -145,18 +146,20 @@ class ImageDepthPoseInference:
             print(f"Depth data directory not found: {depth_dir}")
             return
         
-        # 파일 매칭
+        # Match files
         file_pairs = self.depth_processor.match_image_depth_files(images_dir, depth_dir)
         
         if len(file_pairs) == 0:
             print("No matching files found.")
             return
         
-        # Create output directory
-        output_subdir_name = f"{dataset_name}_result"
-        os.makedirs(output_dir, exist_ok=True)
-        results_dir = os.path.join(output_dir, output_subdir_name)
+        # Create output directories
+        results_dir = os.path.join(output_dir, f"{dataset_name}_result")
         os.makedirs(results_dir, exist_ok=True)
+        
+        # Create result_images directory for visualization results
+        result_images_dir = os.path.join(results_dir, "result_images")
+        os.makedirs(result_images_dir, exist_ok=True)
         
         # List for storing results
         all_results = []
@@ -183,10 +186,10 @@ class ImageDepthPoseInference:
                     image, keypoints_2d, distances, confidence_threshold=0.3, distance_unit="cm"
                 )
                 
-                # Save result image
+                # Save result image in result_images directory
                 result_filename = f"result_{i:04d}_{os.path.basename(image_path)}"
-                result_path = os.path.join(results_dir, result_filename)
-                cv2.imwrite(result_path, result_image)
+                result_path = os.path.join(result_images_dir, result_filename)
+                cv2.imwrite(str(result_path), result_image)
                 
                 # Save result data
                 result_data = {
@@ -199,29 +202,66 @@ class ImageDepthPoseInference:
                 }
                 all_results.append(result_data)
         
-        # Print statistics and save JSON
-        self._save_results_and_statistics(all_results, results_dir, dataset_name)
+        # Save statistics to .out file
+        analysis_output_path = os.path.join(results_dir, "analysis.out")
+        self._save_results_and_statistics(all_results, results_dir, dataset_name, analysis_output_path)
         
-        print(f"Processing complete! Results saved in '{results_dir}' directory")
+        print(f"Processing complete! Results saved in '{results_dir}'")
+        print(f"- Result images: {result_images_dir}")
+        print(f"- Analysis results: {analysis_output_path}")
+
+    def _save_results_and_statistics(self, results: List[Dict], results_dir: str, dataset_name: str, output_path: str):
+        """Save results and print statistics"""
+        # Redirect stdout to file
+        original_stdout = sys.stdout
+        with open(output_path, 'w', encoding='utf-8') as f:
+            sys.stdout = f
+            
+            print(f"\nAnalysis Complete - Statistical Information (centimeter units)")
+            print("=" * 60)
+            total_frames = len(results)
+            valid_frames = len([r for r in results if r['valid_keypoints'] > 0])
+            print(f"Overall Statistics:")
+            print(f"   - Total Frames: {total_frames}")
+            print(f"   - Valid Frames: {valid_frames}")
+            print(f"   - Success Rate: {valid_frames/total_frames*100:.1f}%")
+            
+            self._print_distance_statistics_cm(results)
+            self._print_keypoint_depth_statistics_cm(results)
+            
+        # Restore stdout
+        sys.stdout = original_stdout
     
-    def _save_results_and_statistics(self, results: List[Dict], results_dir: str, dataset_name: str):
-        """Save results and print statistics (in centimeter units)"""
-        results_json_path = os.path.join(results_dir, f"{dataset_name}_analysis_results.json")
-        with open(results_json_path, 'w', encoding='utf-8') as f:
-            json.dump(results, f, indent=2, ensure_ascii=False)
-        print(f"\nAnalysis Complete - Statistical Information (centimeter units)")
-        print("=" * 60)
-        total_frames = len(results)
-        valid_frames = len([r for r in results if r['valid_keypoints'] > 0])
-        print(f"Overall Statistics:")
-        print(f"   - Total Frames: {total_frames}")
-        print(f"   - Valid Frames: {valid_frames}")
-        print(f"   - Success Rate: {valid_frames/total_frames*100:.1f}%")
-        self._print_distance_statistics_cm(results)
-        self._print_keypoint_depth_statistics_cm(results)
-    
+    def _calculate_trimmed_stats(self, data, trim_percent=5):
+        """Calculate trimmed statistics (removing top and bottom 5%)"""
+        if len(data) == 0:
+            return 0.0, 0.0, 0.0, 0.0
+        
+        if len(data) == 1:
+            return float(data[0]), 0.0, float(data[0]), float(data[0])
+            
+        sorted_data = np.sort(data)
+        n = len(data)
+        trim_size = int(n * trim_percent / 100)
+        
+        if trim_size * 2 >= n:  # If trimming would remove all data
+            trimmed_data = sorted_data
+        else:
+            trimmed_data = sorted_data[trim_size:-trim_size]
+            
+        if len(trimmed_data) == 0:  # Additional safety check
+            return 0.0, 0.0, 0.0, 0.0
+        
+        trimmed_mean = np.mean(trimmed_data)
+        trimmed_std = np.std(trimmed_data) if len(trimmed_data) > 1 else 0.0
+        min_val = np.min(trimmed_data)
+        max_val = np.max(trimmed_data)
+        
+        return trimmed_mean, trimmed_std, min_val, max_val
+
     def _print_distance_statistics_cm(self, results: List[Dict]):
         """Print skeleton connection distance statistics and calculate MAE, RMSE, MAPE against ground truth"""
+        # Ground truth distances (cm)
         ground_truth_cm = {
             "0-1": 4.0,   # Nose-Left Eye
             "0-2": 4.0,   # Nose-Right Eye
@@ -243,15 +283,20 @@ class ImageDepthPoseInference:
             "13-15": 40.0,# Left Knee-Left Ankle
             "14-16": 40.0 # Right Knee-Right Ankle
         }
+        
         all_distances = {}
         for result in results:
             for connection_key, distance in result['distances_meters'].items():
                 if distance > 0:
                     if connection_key not in all_distances:
                         all_distances[connection_key] = []
-                    all_distances[connection_key].append(distance * 100.0)
+                    all_distances[connection_key].append(distance * 100.0)  # Convert to cm
+        
         print(f"\nSkeleton Connection Distance Statistics (centimeter units):")
         print("-" * 60)
+        print("10% trimmed is applied")
+        print()
+        
         connection_names = {
             "0-1": "Nose-Left Eye", "0-2": "Nose-Right Eye",
             "1-3": "Left Eye-Left Ear", "2-4": "Right Eye-Right Ear",
@@ -262,39 +307,49 @@ class ImageDepthPoseInference:
             "11-12": "Pelvis-Pelvis", "11-13": "Left Pelvis-Left Knee", "12-14": "Right Pelvis-Right Knee",
             "13-15": "Left Knee-Left Ankle", "14-16": "Right Knee-Right Ankle"
         }
+        
         # Storage for MAE, RMSE, MAPE
         mae_dict, rmse_dict, mape_dict = {}, {}, {}
+        
         for connection_key in sorted(connection_names.keys()):
             distances = all_distances.get(connection_key, [])
             distances_array = np.array(distances) if distances else np.array([0.0])
-            korean_name = connection_names.get(connection_key, connection_key)
-            print(f"{korean_name}")
-            print(f"   Average: {np.mean(distances_array):.1f}cm")
-            print(f"   Standard Deviation: {np.std(distances_array):.1f}cm")
-            print(f"   Range: {np.min(distances_array):.1f}cm ~ {np.max(distances_array):.1f}cm")
+            connection_label = connection_names.get(connection_key, connection_key)
+            
+            # Calculate trimmed statistics
+            mean, std, min_val, max_val = self._calculate_trimmed_stats(distances_array)
+            
+            print(f"{connection_label}")
+            print(f"   Average: {mean:.1f}cm")
+            print(f"   Standard Deviation: {std:.1f}cm")
+            print(f"   Range: {min_val:.1f}cm ~ {max_val:.1f}cm")
             print(f"   Data Count: {len(distances) if distances else 0}")
+            
             # Calculate error against ground truth
             gt = ground_truth_cm.get(connection_key, 0.0)
             if len(distances_array) > 0:
-                abs_err = np.abs(distances_array - gt)
+                # Use trimmed data for error calculations
+                trimmed_data = np.sort(distances_array)[int(len(distances_array)*0.05):int(len(distances_array)*0.95)]
+                abs_err = np.abs(trimmed_data - gt)
                 mae = np.mean(abs_err)
-                rmse = np.sqrt(np.mean((distances_array - gt) ** 2))
+                rmse = np.sqrt(np.mean((trimmed_data - gt) ** 2))
                 mape = np.mean(abs_err / gt * 100) if gt != 0 else 0.0
             else:
                 mae = rmse = mape = 0.0
+            
             print(f"   MAE: {mae:.2f}cm, RMSE: {rmse:.2f}cm, MAPE: {mape:.2f}%")
             mae_dict[connection_key] = mae
             rmse_dict[connection_key] = rmse
             mape_dict[connection_key] = mape
             print()
-
-        # Print MAE, RMSE, MAPE
+        
+        # Print overall average error using trimmed means
         all_mae = np.mean(list(mae_dict.values()))
         all_rmse = np.mean(list(rmse_dict.values()))
         all_mape = np.mean(list(mape_dict.values()))
         print("Overall Connection Average Error:")
         print(f"   MAE: {all_mae:.2f}cm, RMSE: {all_rmse:.2f}cm, MAPE: {all_mape:.2f}%")
-    
+
     def _print_keypoint_depth_statistics_cm(self, results: List[Dict]):
         """Print keypoint depth statistics (in centimeter units)"""
         keypoint_depths = {i: [] for i in range(17)}
@@ -302,17 +357,25 @@ class ImageDepthPoseInference:
             keypoints_3d = np.array(result['keypoints_3d'])
             for i, (px, py, depth, conf) in enumerate(keypoints_3d):
                 if conf > 0.3 and depth > 0:
-                    keypoint_depths[i].append(depth * 100.0) 
+                    keypoint_depths[i].append(depth * 100.0)  # Convert to cm
+        
         print(f"Keypoint Depth Statistics (centimeter units):")
         print("-" * 60)
+        print("10% trimmed is applied")
+        print()
+        
         for joint_id, depths in keypoint_depths.items():
             if depths:
                 depths_array = np.array(depths)
                 joint_name = self.keypoint_names.get(joint_id, f"Joint{joint_id}")
+                
+                # Calculate trimmed statistics
+                mean, std, min_val, max_val = self._calculate_trimmed_stats(depths_array)
+                
                 print(f"{joint_name} (ID: {joint_id})")
-                print(f"   Average Depth: {np.mean(depths_array):.1f}cm")
-                print(f"   Standard Deviation: {np.std(depths_array):.1f}cm")
-                print(f"   Range: {np.min(depths_array):.1f}cm ~ {np.max(depths_array):.1f}cm")
+                print(f"   Average Depth: {mean:.1f}cm")
+                print(f"   Standard Deviation: {std:.1f}cm")
+                print(f"   Range: {min_val:.1f}cm ~ {max_val:.1f}cm")
                 print(f"   Detection Count: {len(depths_array)}")
                 print()
     
@@ -343,22 +406,17 @@ class ImageDepthPoseInference:
             }
             
             for connection, distance in valid_distances.items():
-                korean_name = connection_names.get(connection, f"{connection[0]}-{connection[1]}")
-                print(f"   {korean_name}: {distance:.3f}m")
+                connection_label = connection_names.get(connection, f"{connection[0]}-{connection[1]}")
+                print(f"   {connection_label}: {distance:.3f}m")
 
 def main():
     parser = argparse.ArgumentParser(description='3D Pose Analysis')
     parser.add_argument('--model', required=True, help='ONNX model file path')
     parser.add_argument('--dataset', required=True, help='Dataset directory path')
-    parser.add_argument('--output', default=None, help='Output directory for results')
+    parser.add_argument('--output', default="./output", help='Output directory path (default: ./output)')
     parser.add_argument('--details', action='store_true', help='Print detailed keypoint information')
     
     args = parser.parse_args()
-    
-    # If output is not specified, set based on dataset name
-    if args.output is None:
-        dataset_name = os.path.basename(os.path.normpath(args.dataset))
-        args.output = f"./output/{dataset_name}"
     
     # Initialize analysis system
     analyzer = ImageDepthPoseInference(args.model)
