@@ -1,6 +1,6 @@
 import numpy as np
 import os
-from typing import Tuple, List, Optional, Dict
+from typing import Tuple, List, Dict
 import cv2
 
 
@@ -175,73 +175,6 @@ class DepthProcessor:
         
         distance = np.sqrt(dx*dx + dy*dy + dz*dz)
         return distance
-    
-    def calculate_skeleton_distances_from_3d_points(self, keypoints_3d_list: List[Dict]) -> Dict[str, float]:
-        """
-        Calculate skeleton distances between connected joints from 3D points list
-        
-        Args:
-            keypoints_3d_list: List of 3D keypoints, each element is 
-                {
-                    'joint_id': int,
-                    'x_3d': float,  # Actual 3D coordinates (meters)
-                    'y_3d': float,  # Actual 3D coordinates (meters)
-                    'z_3d': float,  # Depth (meters)
-                    'confidence': float
-                }
-        
-        Returns:
-            Dict[str, float]: Mapping of connection names and distances (meters)
-        """
-        # Keypoint name mapping (COCO format)
-        keypoint_names = {
-            0: "Nose", 1: "Left Eye", 2: "Right Eye", 3: "Left Ear", 4: "Right Ear",
-            5: "Left Shoulder", 6: "Right Shoulder", 7: "Left Elbow", 8: "Right Elbow", 
-            9: "Left Wrist", 10: "Right Wrist", 11: "Left Hip", 12: "Right Hip",
-            13: "Left Knee", 14: "Right Knee", 15: "Left Ankle", 16: "Right Ankle"
-        }
-        
-        # Skeleton connection relationships
-        skeleton_connections = [
-            (0, 1), (0, 2),     # Nose-eyes
-            (1, 3), (2, 4),     # Eyes-ears
-            (1, 2),             # Eyes connection
-            (3, 5), (4, 6),     # Ear-shoulder connection
-            (5, 6),             # Shoulder connection
-            (5, 7), (7, 9),     # Left arm
-            (6, 8), (8, 10),    # Right arm
-            (5, 11), (6, 12),   # Shoulder-hip
-            (11, 12),           # Hip connection
-            (11, 13), (13, 15), # Left leg
-            (12, 14), (14, 16), # Right leg
-        ]
-        
-        keypoints_dict = {kp['joint_id']: kp for kp in keypoints_3d_list}
-        
-        distances = {}
-        
-        for start_idx, end_idx in skeleton_connections:
-            if start_idx in keypoints_dict and end_idx in keypoints_dict:
-                kp1 = keypoints_dict[start_idx]
-                kp2 = keypoints_dict[end_idx]
-                
-                # confidence and depth check
-                if (kp1['confidence'] > 0.3 and kp2['confidence'] > 0.3 and
-                    kp1['z_3d'] > 0 and kp2['z_3d'] > 0):
-                    
-                    # Calculate distance using actual 3D coordinates
-                    point1 = np.array([kp1['x_3d'], kp1['y_3d'], kp1['z_3d'], kp1['confidence']])
-                    point2 = np.array([kp2['x_3d'], kp2['y_3d'], kp2['z_3d'], kp2['confidence']])
-                    
-                    distance = self.calculate_3d_distance(point1, point2)
-                    
-                    if distance > 0:
-                        start_name = keypoint_names.get(start_idx, f"Joint{start_idx}")
-                        end_name = keypoint_names.get(end_idx, f"Joint{end_idx}")
-                        connection_name = f"{start_name}-{end_name}"
-                        distances[connection_name] = distance
-        
-        return distances
     
     def match_image_depth_files(self, images_dir: str, depth_dir: str) -> List[Tuple[str, str]]:
         """

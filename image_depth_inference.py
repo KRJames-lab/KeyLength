@@ -4,19 +4,34 @@ import onnxruntime as ort
 import argparse
 import os
 from typing import Tuple, List, Dict
-import json
 import sys
 
 from utils import PoseVisualizer, KeypointFilter, ImagePreprocessor, DepthProcessor
 from utils.visualization_analysis import save_boxplot, save_histogram, save_framewise_plot
 
 class ImageDepthPoseInference:
-    GROUND_TRUTH_CM = {
-        "0-1": 4.0,   "0-2": 4.0,   "1-3": 7.0,   "2-4": 7.0,   "1-2": 8.0,
-        "3-5": 13.0,  "4-6": 13.0,  "5-6": 36.0,  "5-7": 28.0,  "6-8": 28.0,
-        "7-9": 25.0,  "8-10": 25.0, "5-11": 40.0, "6-12": 40.0, "11-12": 30.0,
-        "11-13": 40.0,"12-14": 40.0,"13-15": 40.0,"14-16": 40.0
-    }
+    COCO_CONNECTIONS = [
+        {"key": "0-1", "label": "Nose-Left Eye", "group": "head_face"},
+        {"key": "0-2", "label": "Nose-Right Eye", "group": "head_face"},
+        {"key": "1-3", "label": "Left Eye-Left Ear", "group": "head_face"},
+        {"key": "2-4", "label": "Right Eye-Right Ear", "group": "head_face"},
+        {"key": "1-2", "label": "Eye-Eye", "group": "head_face"},
+        {"key": "3-5", "label": "Left Ear-Left Shoulder", "group": "upper_body"},
+        {"key": "4-6", "label": "Right Ear-Right Shoulder", "group": "upper_body"},
+        {"key": "5-6", "label": "Shoulder connection", "group": "upper_body"},
+        {"key": "5-7", "label": "Left Shoulder-Left Elbow", "group": "upper_body"},
+        {"key": "7-9", "label": "Left Elbow-Left Wrist", "group": "upper_body"},
+        {"key": "6-8", "label": "Right Shoulder-Right Elbow", "group": "upper_body"},
+        {"key": "8-10", "label": "Right Elbow-Right Wrist", "group": "upper_body"},
+        {"key": "5-11", "label": "Left Shoulder-Left Pelvis", "group": "upper_body"},
+        {"key": "6-12", "label": "Right Shoulder-Right Pelvis", "group": "upper_body"},
+        {"key": "11-12", "label": "Pelvis connection", "group": "upper_body"},
+        {"key": "11-13", "label": "Left Pelvis-Left Knee", "group": "lower_body"},
+        {"key": "13-15", "label": "Left Knee-Left Ankle", "group": "lower_body"},
+        {"key": "12-14", "label": "Right Pelvis-Right Knee", "group": "lower_body"},
+        {"key": "14-16", "label": "Right Knee-Right Ankle", "group": "lower_body"},
+    ]
+    GROUND_TRUTH_CM = {c["key"]: v for c, v in zip(COCO_CONNECTIONS, [4.0, 4.0, 7.0, 7.0, 8.0, 13.0, 13.0, 36.0, 28.0, 25.0, 28.0, 25.0, 40.0, 40.0, 30.0, 40.0, 40.0, 40.0, 40.0])}
 
     def __init__(self, onnx_model_path: str):
         """Initialize the 3D pose inference system.
@@ -240,73 +255,39 @@ class ImageDepthPoseInference:
         # Restore stdout
         sys.stdout = original_stdout
 
-        ground_truth_cm = self.GROUND_TRUTH_CM
-        errors_dict = {k: [] for k in ground_truth_cm.keys()}
-        gt_dict = {k: [] for k in ground_truth_cm.keys()}
-        pred_dict = {k: [] for k in ground_truth_cm.keys()}
+        # Build errors_dict, gt_dict, pred_dict using COCO_CONNECTIONS
+        errors_dict = {c["key"]: [] for c in self.COCO_CONNECTIONS}
+        gt_dict = {c["key"]: [] for c in self.COCO_CONNECTIONS}
+        pred_dict = {c["key"]: [] for c in self.COCO_CONNECTIONS}
         for result in results:
             for k, v in result['distances_meters'].items():
-                if k in ground_truth_cm and v > 0:
-                    gt = ground_truth_cm[k]
+                if k in self.GROUND_TRUTH_CM and v > 0:
+                    gt = self.GROUND_TRUTH_CM[k]
                     pred = v * 100.0
                     errors_dict[k].append(pred - gt)
                     gt_dict[k].append(gt)
                     pred_dict[k].append(pred)
-
-        # Split connections into three anatomical groups
-        head_face = ["0-1", "0-2", "1-3", "2-4", "1-2"]
-        upper_body = ["3-5", "4-6", "5-6", "5-7", "7-9", "6-8", "8-10", "5-11", "6-12", "11-12"]
-        lower_body = ["11-13", "13-15", "12-14", "14-16"]
-
-        groupings = [
-            (head_face, "head_face"),
-            (upper_body, "upper_body"),
-            (lower_body, "lower_body")
-        ]
-
-        # Connection labels for histogram titles
-        connection_labels = {
-            "0-1": "Nose-Left Eye",
-            "0-2": "Nose-Right Eye",
-            "1-3": "Left Eye-Left Ear",
-            "2-4": "Right Eye-Right Ear",
-            "1-2": "Eye-Eye",
-            "3-5": "Left Ear-Left Shoulder",
-            "4-6": "Right Ear-Right Shoulder",
-            "5-6": "Shoulder connection",
-            "5-7": "Left Shoulder-Left Elbow",
-            "7-9": "Left Elbow-Left Wrist",
-            "6-8": "Right Shoulder-Right Elbow",
-            "8-10": "Right Elbow-Right Wrist",
-            "5-11": "Left Shoulder-Left Pelvis",
-            "6-12": "Right Shoulder-Right Pelvis",
-            "11-12": "Pelvis connection",
-            "11-13": "Left Pelvis-Left Knee",
-            "13-15": "Left Knee-Left Ankle",
-            "12-14": "Right Pelvis-Right Knee",
-            "14-16": "Right Knee-Right Ankle"
-        }
-
+        # Group by group field
+        groups = ["head_face", "upper_body", "lower_body"]
         boxplot_dir = os.path.join(results_dir, 'boxplot')
         os.makedirs(boxplot_dir, exist_ok=True)
         histogram_dir = os.path.join(results_dir, 'histogram')
         os.makedirs(histogram_dir, exist_ok=True)
         frameplot_dir = os.path.join(results_dir, 'frameplot')
         os.makedirs(frameplot_dir, exist_ok=True)
-        for group_keys, group_name in groupings:
+        for group_name in groups:
+            group_keys = [c["key"] for c in self.COCO_CONNECTIONS if c["group"] == group_name]
             group_errors = {k: errors_dict[k] for k in group_keys if k in errors_dict}
             group_gt = {k: gt_dict[k] for k in group_keys if k in gt_dict}
             group_pred = {k: pred_dict[k] for k in group_keys if k in pred_dict}
+            connection_labels = {c["key"]: c["label"] for c in self.COCO_CONNECTIONS if c["group"] == group_name}
             if any(len(v) > 0 for v in group_errors.values()):
                 save_boxplot(group_errors, boxplot_dir, title_prefix=f"{dataset_name} {group_name}")
-                # Save with group name in filename
                 os.rename(
                     os.path.join(boxplot_dir, 'boxplot.png'),
                     os.path.join(boxplot_dir, f'boxplot_{group_name}.png')
                 )
-                # Save histograms for each connection in the group in the histogram directory
                 save_histogram(group_errors, histogram_dir, connection_labels, title_prefix=f"{dataset_name} {group_name}")
-                # Save framewise scatter plots for each connection in the group in the frameplot directory
                 save_framewise_plot(group_gt, group_pred, frameplot_dir, connection_labels, title_prefix=f"{dataset_name} {group_name}")
 
     def _calculate_trimmed_stats(self, data, trim_ratio=0.1):
@@ -338,9 +319,7 @@ class ImageDepthPoseInference:
 
     def _print_distance_statistics_cm(self, results: List[Dict], trim_ratio: float):
         """Print skeleton connection distance statistics and calculate MAE, RMSE, MAPE against ground truth"""
-        # Ground truth distances (cm)
-        ground_truth_cm = self.GROUND_TRUTH_CM
-        
+        # Use COCO_CONNECTIONS for order and label
         all_distances = {}
         for result in results:
             for connection_key, distance in result['distances_meters'].items():
@@ -348,55 +327,25 @@ class ImageDepthPoseInference:
                     if connection_key not in all_distances:
                         all_distances[connection_key] = []
                     all_distances[connection_key].append(distance * 100.0)  # Convert to cm
-        
         print(f"\nSkeleton Connection Distance Statistics (centimeter units):")
         print("-" * 60)
         print(f"{trim_ratio * 2 * 100:.0f}% trimmed is applied")
         print()
-        
-        connection_names = {
-            "0-1": "Nose-Left Eye", "0-2": "Nose-Right Eye",
-            "1-3": "Left Eye-Left Ear", "2-4": "Right Eye-Right Ear",
-            "1-2": "Eye-Eye", "3-5": "Left Ear-Left Shoulder", "4-6": "Right Ear-Right Shoulder",
-            "5-6": "Shoulder connection", "5-7": "Left Shoulder-Left Elbow", "6-8": "Right Shoulder-Right Elbow",
-            "7-9": "Left Elbow-Left Wrist", "8-10": "Right Elbow-Right Wrist",
-            "5-11": "Left Shoulder-Left Pelvis", "6-12": "Right Shoulder-Right Pelvis",
-            "11-12": "Pelvis connection", "11-13": "Left Pelvis-Left Knee", "12-14": "Right Pelvis-Right Knee",
-            "13-15": "Left Knee-Left Ankle", "14-16": "Right Knee-Right Ankle"
-        }
-
-        # Desired output order for analysis.out
-        output_order = [
-            'Nose-Left Eye', 'Nose-Right Eye', 'Left Eye-Left Ear', 'Right Eye-Right Ear', 'Eye-Eye',
-            'Left Ear-Left Shoulder', 'Right Ear-Right Shoulder', 'Shoulder connection',
-            'Left Shoulder-Left Elbow', 'Left Elbow-Left Wrist', 'Right Shoulder-Right Elbow', 'Right Elbow-Right Wrist',
-            'Left Shoulder-Left Pelvis', 'Right Shoulder-Right Pelvis', 'Pelvis connection',
-            'Left Pelvis-Left Knee', 'Left Knee-Left Ankle', 'Right Pelvis-Right Knee', 'Right Knee-Right Ankle'
-        ]
-        # Map label to connection key
-        label_to_key = {v: k for k, v in connection_names.items()}
-
-        # Storage for MAE, RMSE, MAPE
+        # Use COCO_CONNECTIONS order
         mae_dict, rmse_dict, mape_dict = {}, {}, {}
-
-        for label in output_order:
-            connection_key = label_to_key.get(label)
-            if connection_key is None:
-                continue
+        for c in self.COCO_CONNECTIONS:
+            connection_key = c["key"]
+            connection_label = c["label"]
             distances = all_distances.get(connection_key, [])
             distances_array = np.array(distances) if distances else np.array([0.0])
-            connection_label = label
-            # Calculate trimmed statistics
             mean, std, min_val, max_val = self._calculate_trimmed_stats(distances_array, trim_ratio=trim_ratio)
             print(f"{connection_label}")
             print(f"   Average: {mean:.1f}cm")
             print(f"   Standard Deviation: {std:.1f}cm")
             print(f"   Range: {min_val:.1f}cm ~ {max_val:.1f}cm")
             print(f"   Data Count: {len(distances) if distances else 0}")
-            # Calculate error against ground truth
-            gt = ground_truth_cm.get(connection_key, 0.0)
+            gt = self.GROUND_TRUTH_CM.get(connection_key, 0.0)
             if len(distances_array) > 0:
-                # Use trimmed data for error calculations
                 n = len(distances_array)
                 trim_size = int(n * trim_ratio)
                 if trim_size * 2 >= n:
