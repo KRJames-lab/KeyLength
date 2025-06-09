@@ -122,7 +122,7 @@ class ImageDepthPoseInference:
         
         return filtered_keypoints_2d, keypoints_3d, distances
     
-    def process_dataset(self, dataset_path: str, output_dir: str = "./output", details: bool = False):
+    def process_dataset(self, dataset_path: str, output_dir: str = "./output", details: bool = False, trim_ratio: float = 0.1):
         """
         Process the entire dataset.
         
@@ -130,6 +130,7 @@ class ImageDepthPoseInference:
             dataset_path (str): Dataset directory path
             output_dir (str): Output directory path (default: ./output)
             details (bool): Whether to print detailed keypoint information
+            trim_ratio (float): Ratio to trim from each end for statistics (e.g., 0.1 for 10%) (default: 0.1)
         """
         # Extract input directory name
         dataset_name = os.path.basename(os.path.normpath(dataset_path))
@@ -204,13 +205,13 @@ class ImageDepthPoseInference:
         
         # Save statistics to .out file
         analysis_output_path = os.path.join(results_dir, "analysis.out")
-        self._save_results_and_statistics(all_results, results_dir, dataset_name, analysis_output_path)
+        self._save_results_and_statistics(all_results, results_dir, dataset_name, analysis_output_path, trim_ratio)
         
         print(f"Processing complete! Results saved in '{results_dir}'")
         print(f"- Result images: {result_images_dir}")
         print(f"- Analysis results: {analysis_output_path}")
 
-    def _save_results_and_statistics(self, results: List[Dict], results_dir: str, dataset_name: str, output_path: str):
+    def _save_results_and_statistics(self, results: List[Dict], results_dir: str, dataset_name: str, output_path: str, trim_ratio: float):
         """Save results and print statistics"""
         # Redirect stdout to file
         original_stdout = sys.stdout
@@ -226,14 +227,14 @@ class ImageDepthPoseInference:
             print(f"   - Valid Frames: {valid_frames}")
             print(f"   - Success Rate: {valid_frames/total_frames*100:.1f}%")
             
-            self._print_distance_statistics_cm(results)
-            self._print_keypoint_depth_statistics_cm(results)
+            self._print_distance_statistics_cm(results, trim_ratio)
+            self._print_keypoint_depth_statistics_cm(results, trim_ratio)
             
         # Restore stdout
         sys.stdout = original_stdout
     
-    def _calculate_trimmed_stats(self, data, trim_percent=5):
-        """Calculate trimmed statistics (removing top and bottom 5%)"""
+    def _calculate_trimmed_stats(self, data, trim_ratio=0.1):
+        """Calculate trimmed statistics (removing top and bottom ratio)"""
         if len(data) == 0:
             return 0.0, 0.0, 0.0, 0.0
         
@@ -242,7 +243,7 @@ class ImageDepthPoseInference:
             
         sorted_data = np.sort(data)
         n = len(data)
-        trim_size = int(n * trim_percent / 100)
+        trim_size = int(n * trim_ratio)
         
         if trim_size * 2 >= n:  # If trimming would remove all data
             trimmed_data = sorted_data
@@ -259,7 +260,7 @@ class ImageDepthPoseInference:
         
         return trimmed_mean, trimmed_std, min_val, max_val
 
-    def _print_distance_statistics_cm(self, results: List[Dict]):
+    def _print_distance_statistics_cm(self, results: List[Dict], trim_ratio: float):
         """Print skeleton connection distance statistics and calculate MAE, RMSE, MAPE against ground truth"""
         # Ground truth distances (cm)
         ground_truth_cm = {
@@ -294,7 +295,7 @@ class ImageDepthPoseInference:
         
         print(f"\nSkeleton Connection Distance Statistics (centimeter units):")
         print("-" * 60)
-        print("10% trimmed is applied")
+        print(f"{trim_ratio * 2 * 100:.0f}% trimmed is applied")
         print()
         
         connection_names = {
@@ -317,7 +318,7 @@ class ImageDepthPoseInference:
             connection_label = connection_names.get(connection_key, connection_key)
             
             # Calculate trimmed statistics
-            mean, std, min_val, max_val = self._calculate_trimmed_stats(distances_array)
+            mean, std, min_val, max_val = self._calculate_trimmed_stats(distances_array, trim_ratio=trim_ratio)
             
             print(f"{connection_label}")
             print(f"   Average: {mean:.1f}cm")
@@ -329,7 +330,17 @@ class ImageDepthPoseInference:
             gt = ground_truth_cm.get(connection_key, 0.0)
             if len(distances_array) > 0:
                 # Use trimmed data for error calculations
-                trimmed_data = np.sort(distances_array)[int(len(distances_array)*0.05):int(len(distances_array)*0.95)]
+                n = len(distances_array)
+                trim_size = int(n * trim_ratio)
+                
+                if trim_size * 2 >= n:
+                    trimmed_data = np.sort(distances_array)
+                else:
+                    trimmed_data = np.sort(distances_array)[trim_size:-trim_size]
+
+                if len(trimmed_data) == 0:
+                    trimmed_data = distances_array
+                    
                 abs_err = np.abs(trimmed_data - gt)
                 mae = np.mean(abs_err)
                 rmse = np.sqrt(np.mean((trimmed_data - gt) ** 2))
@@ -350,7 +361,7 @@ class ImageDepthPoseInference:
         print("Overall Connection Average Error:")
         print(f"   MAE: {all_mae:.2f}cm, RMSE: {all_rmse:.2f}cm, MAPE: {all_mape:.2f}%")
 
-    def _print_keypoint_depth_statistics_cm(self, results: List[Dict]):
+    def _print_keypoint_depth_statistics_cm(self, results: List[Dict], trim_ratio: float):
         """Print keypoint depth statistics (in centimeter units)"""
         keypoint_depths = {i: [] for i in range(17)}
         for result in results:
@@ -359,9 +370,9 @@ class ImageDepthPoseInference:
                 if conf > 0.3 and depth > 0:
                     keypoint_depths[i].append(depth * 100.0)  # Convert to cm
         
-        print(f"Keypoint Depth Statistics (centimeter units):")
+        print(f"\nKeypoint Depth Statistics (centimeter units):")
         print("-" * 60)
-        print("10% trimmed is applied")
+        print(f"{trim_ratio * 2 * 100:.0f}% trimmed is applied")
         print()
         
         for joint_id, depths in keypoint_depths.items():
@@ -370,7 +381,7 @@ class ImageDepthPoseInference:
                 joint_name = self.keypoint_names.get(joint_id, f"Joint{joint_id}")
                 
                 # Calculate trimmed statistics
-                mean, std, min_val, max_val = self._calculate_trimmed_stats(depths_array)
+                mean, std, min_val, max_val = self._calculate_trimmed_stats(depths_array, trim_ratio=trim_ratio)
                 
                 print(f"{joint_name} (ID: {joint_id})")
                 print(f"   Average Depth: {mean:.1f}cm")
@@ -415,6 +426,7 @@ def main():
     parser.add_argument('--dataset', required=True, help='Dataset directory path')
     parser.add_argument('--output', default="./output", help='Output directory path (default: ./output)')
     parser.add_argument('--details', action='store_true', help='Print detailed keypoint information')
+    parser.add_argument('--trim', type=float, default=0.1, help='Ratio to trim from each end for statistics (e.g., 0.1 for 10%%) (default: 0.1)')
     
     args = parser.parse_args()
     
@@ -422,7 +434,7 @@ def main():
     analyzer = ImageDepthPoseInference(args.model)
     
     # Process dataset
-    analyzer.process_dataset(args.dataset, args.output, args.details)
+    analyzer.process_dataset(args.dataset, args.output, args.details, args.trim)
 
 if __name__ == "__main__":
     main() 
