@@ -1,4 +1,8 @@
-/output/
 /align/bag/
 /datasets/
 /onnx/
+
+# output
+/output/*
+!/output/
+!/output/compare_analysis.py
