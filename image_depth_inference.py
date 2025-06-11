@@ -356,7 +356,9 @@ class ImageDepthPoseInference:
             if len(distances_array) > 0:
                 n = len(distances_array)
                 trim_size = int(n * trim_ratio)
-                if trim_size * 2 >= n:
+                if trim_size == 0:
+                    trimmed_data = np.sort(distances_array)
+                elif trim_size * 2 >= n:
                     trimmed_data = np.sort(distances_array)
                 else:
                     trimmed_data = np.sort(distances_array)[trim_size:-trim_size]
@@ -369,34 +371,10 @@ class ImageDepthPoseInference:
                 # Count the number of frames with APE over 200%
                 ape = abs_err / gt * 100 if gt != 0 else np.zeros_like(abs_err)
                 over_200_count = int(np.sum(ape > 200))
-                # Calculate the number of frames within z-score ranges
-                if len(trimmed_data) > 1 and np.std(trimmed_data) > 0:
-                    z_scores = (trimmed_data - np.mean(trimmed_data)) / np.std(trimmed_data)
-                else:
-                    z_scores = np.zeros_like(trimmed_data)
-                z2_count = int(np.sum((z_scores >= -2) & (z_scores <= 2)))
-                z3_count = int(np.sum((z_scores >= -3) & (z_scores <= 3)))
-                z2_ratio = (z2_count / len(trimmed_data) * 100) if len(trimmed_data) > 0 else 0.0
-                z3_ratio = (z3_count / len(trimmed_data) * 100) if len(trimmed_data) > 0 else 0.0
-                # Count frames with |z| >= 2 and |z| >= 3
-                abs_z2_count = int(np.sum(np.abs(z_scores) >= 2))
-                abs_z3_count = int(np.sum(np.abs(z_scores) >= 3))
-                abs_z2_ratio = (abs_z2_count / len(trimmed_data) * 100) if len(trimmed_data) > 0 else 0.0
-                abs_z3_ratio = (abs_z3_count / len(trimmed_data) * 100) if len(trimmed_data) > 0 else 0.0
             else:
                 mae = rmse = mape = 0.0
                 over_200_count = 0
-                z2_count = 0
-                z3_count = 0
-                z2_ratio = 0.0
-                z3_ratio = 0.0
-                abs_z2_count = 0
-                abs_z3_count = 0
-                abs_z2_ratio = 0.0
-                abs_z3_ratio = 0.0
             print(f"   MAE: {mae:.2f}cm, MAPE: {mape:.2f}%({over_200_count}), RMSE: {rmse:.2f}cm")
-            print(f"   Z-score in [-2,2]: {z2_count} frames ({z2_ratio:.1f}%), [-3,3]: {z3_count} frames ({z3_ratio:.1f}%)")
-            print(f"   |Z| >= 2: {abs_z2_count} frames ({abs_z2_ratio:.1f}%), |Z| >= 3: {abs_z3_count} frames ({abs_z3_ratio:.1f}%)")
             mae_dict[connection_key] = mae
             rmse_dict[connection_key] = rmse
             mape_dict[connection_key] = mape
