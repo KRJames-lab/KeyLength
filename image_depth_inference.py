@@ -302,7 +302,10 @@ class ImageDepthPoseInference:
         n = len(data)
         trim_size = int(n * trim_ratio)
         
-        if trim_size * 2 >= n:  # If trimming would remove all data
+        # Fix: if trim_ratio is 0, use all data
+        if trim_size == 0:
+            trimmed_data = sorted_data
+        elif trim_size * 2 >= n:  # If trimming would remove all data
             trimmed_data = sorted_data
         else:
             trimmed_data = sorted_data[trim_size:-trim_size]
@@ -319,6 +322,8 @@ class ImageDepthPoseInference:
 
     def _print_distance_statistics_cm(self, results: List[Dict], trim_ratio: float):
         """Print skeleton connection distance statistics and calculate MAE, RMSE, MAPE against ground truth"""
+        # Use COCO_CONNECTIONS order
+        mae_dict, rmse_dict, mape_dict = {}, {}, {}
         # Use COCO_CONNECTIONS for order and label
         all_distances = {}
         for result in results:
@@ -331,8 +336,11 @@ class ImageDepthPoseInference:
         print("-" * 60)
         print(f"{trim_ratio * 2 * 100:.0f}% trimmed is applied")
         print()
-        # Use COCO_CONNECTIONS order
-        mae_dict, rmse_dict, mape_dict = {}, {}, {}
+        # Variables for total z-score range counts
+        total_z2_count = 0
+        total_z3_count = 0
+        total_abs_z2_count = 0
+        total_abs_z3_count = 0
         for c in self.COCO_CONNECTIONS:
             connection_key = c["key"]
             connection_label = c["label"]
@@ -358,20 +366,76 @@ class ImageDepthPoseInference:
                 mae = np.mean(abs_err)
                 rmse = np.sqrt(np.mean((trimmed_data - gt) ** 2))
                 mape = np.mean(abs_err / gt * 100) if gt != 0 else 0.0
+                # Count the number of frames with APE over 200%
+                ape = abs_err / gt * 100 if gt != 0 else np.zeros_like(abs_err)
+                over_200_count = int(np.sum(ape > 200))
+                # Calculate the number of frames within z-score ranges
+                if len(trimmed_data) > 1 and np.std(trimmed_data) > 0:
+                    z_scores = (trimmed_data - np.mean(trimmed_data)) / np.std(trimmed_data)
+                else:
+                    z_scores = np.zeros_like(trimmed_data)
+                z2_count = int(np.sum((z_scores >= -2) & (z_scores <= 2)))
+                z3_count = int(np.sum((z_scores >= -3) & (z_scores <= 3)))
+                z2_ratio = (z2_count / len(trimmed_data) * 100) if len(trimmed_data) > 0 else 0.0
+                z3_ratio = (z3_count / len(trimmed_data) * 100) if len(trimmed_data) > 0 else 0.0
+                # Count frames with |z| >= 2 and |z| >= 3
+                abs_z2_count = int(np.sum(np.abs(z_scores) >= 2))
+                abs_z3_count = int(np.sum(np.abs(z_scores) >= 3))
+                abs_z2_ratio = (abs_z2_count / len(trimmed_data) * 100) if len(trimmed_data) > 0 else 0.0
+                abs_z3_ratio = (abs_z3_count / len(trimmed_data) * 100) if len(trimmed_data) > 0 else 0.0
             else:
                 mae = rmse = mape = 0.0
-            print(f"   MAE: {mae:.2f}cm, RMSE: {rmse:.2f}cm, MAPE: {mape:.2f}%")
+                over_200_count = 0
+                z2_count = 0
+                z3_count = 0
+                z2_ratio = 0.0
+                z3_ratio = 0.0
+                abs_z2_count = 0
+                abs_z3_count = 0
+                abs_z2_ratio = 0.0
+                abs_z3_ratio = 0.0
+            print(f"   MAE: {mae:.2f}cm, MAPE: {mape:.2f}%({over_200_count}), RMSE: {rmse:.2f}cm")
+            print(f"   Z-score in [-2,2]: {z2_count} frames ({z2_ratio:.1f}%), [-3,3]: {z3_count} frames ({z3_ratio:.1f}%)")
+            print(f"   |Z| >= 2: {abs_z2_count} frames ({abs_z2_ratio:.1f}%), |Z| >= 3: {abs_z3_count} frames ({abs_z3_ratio:.1f}%)")
             mae_dict[connection_key] = mae
             rmse_dict[connection_key] = rmse
             mape_dict[connection_key] = mape
+            if 'over_200_counts' not in locals():
+                over_200_counts = {}
+            over_200_counts[connection_key] = over_200_count
+            # Accumulate total counts for all connections
+            total_z2_count += z2_count
+            total_z3_count += z3_count
+            total_abs_z2_count += abs_z2_count
+            total_abs_z3_count += abs_z3_count
             print()
-        
         # Print overall average error using trimmed means
         all_mae = np.mean(list(mae_dict.values()))
         all_rmse = np.mean(list(rmse_dict.values()))
         all_mape = np.mean(list(mape_dict.values()))
+        total_over_200 = sum(over_200_counts.values()) if 'over_200_counts' in locals() else 0
         print("Overall Connection Average Error:")
-        print(f"   MAE: {all_mae:.2f}cm, RMSE: {all_rmse:.2f}cm, MAPE: {all_mape:.2f}%")
+        print(f"   MAE: {all_mae:.2f}cm, MAPE: {all_mape:.2f}%({total_over_200}), RMSE: {all_rmse:.2f}cm")
+        total_trimmed = total_z2_count  # will be overwritten below
+        total_trimmed3 = total_z3_count
+        total_frames = 0
+        for c in self.COCO_CONNECTIONS:
+            connection_key = c["key"]
+            distances = all_distances.get(connection_key, [])
+            distances_array = np.array(distances) if distances else np.array([0.0])
+            n = len(distances_array)
+            trim_size = int(n * trim_ratio)
+            if trim_size * 2 >= n:
+                trimmed_data = np.sort(distances_array)
+            else:
+                trimmed_data = np.sort(distances_array)[trim_size:-trim_size]
+            total_frames += len(trimmed_data)
+        z2_total_ratio = (total_z2_count / total_frames * 100) if total_frames > 0 else 0.0
+        z3_total_ratio = (total_z3_count / total_frames * 100) if total_frames > 0 else 0.0
+        abs_z2_total_ratio = (total_abs_z2_count / total_frames * 100) if total_frames > 0 else 0.0
+        abs_z3_total_ratio = (total_abs_z3_count / total_frames * 100) if total_frames > 0 else 0.0
+        print(f"   Z-score in [-2,2]: {total_z2_count} frames ({z2_total_ratio:.1f}%), [-3,3]: {total_z3_count} frames ({z3_total_ratio:.1f}%)")
+        print(f"   |Z| >= 2: {total_abs_z2_count} frames ({abs_z2_total_ratio:.1f}%), |Z| >= 3: {total_abs_z3_count} frames ({abs_z3_total_ratio:.1f}%)")
 
     def _print_keypoint_depth_statistics_cm(self, results: List[Dict], trim_ratio: float):
         """Print keypoint depth statistics (in centimeter units)"""
