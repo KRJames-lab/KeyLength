@@ -70,7 +70,7 @@ class Analysis:
             group_pred = {k: pred_dict[k] for k in group_keys if k in pred_dict}
             connection_labels = {c["key"]: c["label"] for c in self.COCO_CONNECTIONS if c["group"] == group_name}
             if any(len(v) > 0 for v in group_errors.values()):
-                save_boxplot(group_errors, boxplot_dir, title_prefix=f"{dataset_name} {group_name}")
+                save_boxplot(group_errors, boxplot_dir, title_prefix=f"{group_name}")
                 os.rename(
                     os.path.join(boxplot_dir, 'boxplot.png'),
                     os.path.join(boxplot_dir, f'boxplot_{group_name}.png')
