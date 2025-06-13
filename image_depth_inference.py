@@ -6,7 +6,7 @@ import os
 from typing import Tuple, List, Dict
 import sys
 
-from utils import PoseVisualizer, KeypointFilter, ImagePreprocessor, DepthProcessor, Analysis
+from utils import PoseVisualizer, KeypointFilter, ImagePreprocessor, DepthProcessor, Analysis, AnomalyDetector
 from utils.visualization_analysis import save_boxplot, save_histogram, save_framewise_plot
 
 class ImageDepthPoseInference:
@@ -229,6 +229,13 @@ class ImageDepthPoseInference:
                 }
                 all_results.append(result_data)
         
+        # Anomaly Detection and Correction
+        if self.use_extension:
+            print(f"Applying anomaly detection with window size W={self.window_size}...")
+            detector = AnomalyDetector(window_size=self.window_size)
+            all_results = detector.process(all_results)
+            print("Anomaly detection complete.")
+
         # Save statistics to .out file
         analysis_output_path = os.path.join(results_dir, "analysis.out")
         
@@ -278,12 +285,18 @@ def main():
     parser.add_argument('--output', default="./output", help='Output directory path (default: ./output)')
     parser.add_argument('--details', action='store_true', help='Print detailed keypoint information')
     parser.add_argument('--trim', type=float, default=0.1, help='Ratio to trim from each end for statistics (e.g., 0.1 for 10%%) (default: 0.1)')
+    parser.add_argument('--extension', action='store_true', help='Enable anomaly detection and correction extension.')
+    parser.add_argument('--W', type=int, default=30, help='Sliding window size for anomaly detection (W=0 for all frames).')
     
     args = parser.parse_args()
     
     # Initialize analysis system
     analyzer = ImageDepthPoseInference(args.model)
     
+    # Pass extension args to the processor
+    analyzer.use_extension = args.extension
+    analyzer.window_size = args.W
+
     # Process dataset
     analyzer.process_dataset(args.dataset, args.output, args.details, args.trim)
 
