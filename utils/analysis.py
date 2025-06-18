@@ -178,7 +178,7 @@ class Analysis:
 
     def _print_keypoint_depth_statistics_cm(self, results: List[Dict], trim_ratio: float):
         """Print keypoint depth statistics (in centimeter units)"""
-        keypoint_depths = {i: [] for i in range(17)}
+        keypoint_depths = {i: [] for i in self.keypoint_names.keys()}
         for result in results:
             keypoints_3d = np.array(result['keypoints_3d'])
             for i, (px, py, depth, conf) in enumerate(keypoints_3d):
