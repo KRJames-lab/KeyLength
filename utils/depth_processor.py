@@ -2,6 +2,7 @@ import numpy as np
 import os
 from typing import Tuple, List, Dict
 import cv2
+import re
 
 
 class DepthProcessor:
@@ -30,6 +31,38 @@ class DepthProcessor:
             [0, self.fy, self.cy],
             [0, 0, 1]
         ])
+    
+    def read_depth_png(self, png_path: str, affine_transform: np.ndarray) -> np.ndarray:
+        """
+        Read a 16-bit PNG depth file, apply affine transformation, and convert to meters.
+
+        Args:
+            png_path (str): Path to the 16-bit PNG file.
+            affine_transform (np.ndarray): 2x3 affine transformation matrix.
+
+        Returns:
+            np.ndarray: Transformed depth image [1080, 1920] in meters (float32).
+        """
+        try:
+            # Read the 16-bit PNG file as is
+            depth_image_mm = cv2.imread(png_path, cv2.IMREAD_UNCHANGED)
+            if depth_image_mm is None:
+                raise ValueError("Failed to load PNG file.")
+
+            # The depth values are in millimeters, convert to float for calculations
+            depth_image_mm = depth_image_mm.astype(np.float32)
+
+            # Apply the affine transformation. The output size should match the RGB camera resolution.
+            transformed_depth_mm = cv2.warpAffine(depth_image_mm, affine_transform[:2, :], (1920, 1080))
+            
+            # Convert from millimeters to meters
+            transformed_depth_meters = transformed_depth_mm / 1000.0
+            
+            return transformed_depth_meters.astype(np.float32)
+
+        except Exception as e:
+            print(f"Depth PNG file read failed: {png_path}, error: {e}")
+            return np.zeros((1080, 1920), dtype=np.float32)
     
     def read_depth_bin(self, bin_path: str, width: int = 640, height: int = 480) -> np.ndarray:
         """
@@ -176,6 +209,94 @@ class DepthProcessor:
         distance = np.sqrt(dx*dx + dy*dy + dz*dz)
         return distance
     
+    def match_image_png_depth_files(self, images_dir: str, png_depth_root_dir: str) -> List[Tuple[str, str]]:
+        """
+        Match images with PNG depth files based on a specific directory and file naming convention.
+        - Image format: {action_name}_rgb_{frame_index}.jpg (e.g., S001C001P001R001A001_rgb_0000.jpg)
+        - Depth format: {png_depth_root_dir}/.../{action_name}/Depth-{frame_index+1}.png
+
+        Args:
+            images_dir (str): Path to the directory containing color images.
+            png_depth_root_dir (str): Path to the root directory containing PNG depth files in subdirectories.
+
+        Returns:
+            List[Tuple[str, str]]: List of (image_path, png_depth_path) pairs.
+        """
+        print(f"Searching for PNG depth files under: {png_depth_root_dir}")
+        
+        # 1. Build a map of all available PNG depth files
+        depth_map = {}  # Key: (action_name, frame_number), Value: full_path
+        for root, _, files in os.walk(png_depth_root_dir):
+            for file in files:
+                if file.lower().startswith('depth-') and file.lower().endswith('.png'):
+                    try:
+                        # Depth-00000001.png -> 1
+                        frame_num_str = re.search(r'(\d+)', file)
+                        if not frame_num_str:
+                            continue
+                        frame_num = int(frame_num_str.group(1))
+                        
+                        # Parent directory name is the action name
+                        action_name = os.path.basename(root)
+                        
+                        depth_map[(action_name, frame_num)] = os.path.join(root, file)
+                    except (ValueError, IndexError):
+                        continue
+
+        print(f"Found {len(depth_map)} PNG depth files.")
+        if not depth_map:
+            print("Warning: No valid PNG depth files found. Check the directory structure and file names.")
+
+        # 2. Get image file list and match with depth map
+        image_files = []
+        for ext in ['.jpg', '.jpeg', '.png', '.bmp']:
+            image_files.extend([f for f in os.listdir(images_dir) if f.lower().endswith(ext)])
+        image_files.sort()
+
+        matched_pairs = []
+        for image_file in image_files:
+            try:
+                # S001C001P001R001A001_rgb_0000.jpg
+                base_name = os.path.splitext(image_file)[0]
+                
+                # Use regex for more robust parsing
+                match = re.match(r'(.+)_rgb_(\d+)', base_name)
+                if not match:
+                    continue
+                    
+                action_name = match.group(1)
+                frame_idx = int(match.group(2))
+                
+                # Depth frames are 1-indexed
+                depth_frame_num = frame_idx + 1
+                
+                key = (action_name, depth_frame_num)
+                if key in depth_map:
+                    image_path = os.path.join(images_dir, image_file)
+                    depth_path = depth_map[key]
+                    matched_pairs.append((image_path, depth_path))
+            except (ValueError, IndexError):
+                continue
+        
+        print(f"Matched image and PNG depth files: {len(matched_pairs)}")
+        if not matched_pairs and image_files:
+            print("Warning: No image files could be matched with depth files. Please check naming conventions:")
+            print(f"  - Example image name: S001C001P001R001A001_rgb_0000.jpg")
+            print(f"  - Expected depth file: .../S001C001P001R001A001/Depth-00000001.png")
+            # Log a few examples
+            if depth_map:
+                print("  - Sample keys from found depth files:", list(depth_map.keys())[:5])
+            if image_files:
+                sample_img = image_files[0]
+                base_name = os.path.splitext(sample_img)[0]
+                match = re.match(r'(.+)_rgb_(\d+)', base_name)
+                if match:
+                    action_name = match.group(1)
+                    frame_idx = int(match.group(2))
+                    print(f"  - Parsed from first image '{sample_img}': action='{action_name}', frame_idx={frame_idx}")
+                    print(f"  - Looking for key: ('{action_name}', {frame_idx + 1})")
+        return matched_pairs
+
     def match_image_depth_files(self, images_dir: str, depth_dir: str) -> List[Tuple[str, str]]:
         """
         Match images and depth files in chronological order
