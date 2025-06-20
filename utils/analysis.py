@@ -52,7 +52,19 @@ class Analysis:
                 if k in self.GROUND_TRUTH_CM and v > 0:
                     gt = self.GROUND_TRUTH_CM[k]
                     pred = v * 100.0
-                    errors_dict[k].append(pred - gt)
+                    
+                    # Handle both single value and range GT for error calculation
+                    error = 0
+                    if isinstance(gt, list):
+                        gt_min, gt_max = gt[0], gt[1]
+                        if pred < gt_min:
+                            error = pred - gt_min  # Negative error
+                        elif pred > gt_max:
+                            error = pred - gt_max   # Positive error
+                    else:
+                        error = pred - gt
+                    
+                    errors_dict[k].append(error)
                     gt_dict[k].append(gt)
                     pred_dict[k].append(pred)
         # Group by group field
@@ -139,8 +151,9 @@ class Analysis:
             print(f"   Standard Deviation: {std:.1f}cm")
             print(f"   Range: {min_val:.1f}cm ~ {max_val:.1f}cm")
             print(f"   Data Count: {len(distances) if distances else 0}")
-            gt = self.GROUND_TRUTH_CM.get(connection_key, 0.0)
-            if len(distances_array) > 0:
+            gt = self.GROUND_TRUTH_CM.get(connection_key, None)
+            
+            if gt is not None and len(distances_array) > 0:
                 n = len(distances_array)
                 trim_size = int(n * trim_ratio)
                 if trim_size == 0:
@@ -151,16 +164,48 @@ class Analysis:
                     trimmed_data = np.sort(distances_array)[trim_size:-trim_size]
                 if len(trimmed_data) == 0:
                     trimmed_data = distances_array
-                abs_err = np.abs(trimmed_data - gt)
-                mae = np.mean(abs_err)
-                rmse = np.sqrt(np.mean((trimmed_data - gt) ** 2))
-                mape = np.mean(abs_err / gt * 100) if gt != 0 else 0.0
-                # Count the number of frames with APE over 200%
-                ape = abs_err / gt * 100 if gt != 0 else np.zeros_like(abs_err)
-                over_200_count = int(np.sum(ape > 200))
+
+                # Check if GT is a range (list) or a single value
+                if isinstance(gt, list):
+                    # Range-based error calculation
+                    gt_min, gt_max = gt[0], gt[1]
+                    errors = []
+                    percent_errors = []
+                    for pred in trimmed_data:
+                        error = 0
+                        if pred < gt_min:
+                            error = gt_min - pred
+                            # MAPE calculation based on the closest boundary
+                            percent_error = (error / gt_min) * 100 if gt_min != 0 else 0
+                        elif pred > gt_max:
+                            error = pred - gt_max
+                            # MAPE calculation based on the closest boundary
+                            percent_error = (error / gt_max) * 100 if gt_max != 0 else 0
+                        else: # Inside the range
+                            percent_error = 0
+                        errors.append(error)
+                        percent_errors.append(percent_error)
+                    
+                    errors = np.array(errors)
+                    mae = np.mean(errors)
+                    rmse = np.sqrt(np.mean(errors ** 2))
+                    mape = np.mean(percent_errors)
+                    ape = np.array(percent_errors) # Use the already calculated percentage errors
+                    over_200_count = int(np.sum(ape > 200))
+
+                else:
+                    # Single value error calculation (existing logic)
+                    abs_err = np.abs(trimmed_data - gt)
+                    mae = np.mean(abs_err)
+                    rmse = np.sqrt(np.mean((trimmed_data - gt) ** 2))
+                    mape = np.mean(abs_err / gt * 100) if gt != 0 else 0.0
+                    # Count the number of frames with APE over 200%
+                    ape = abs_err / gt * 100 if gt != 0 else np.zeros_like(abs_err)
+                    over_200_count = int(np.sum(ape > 200))
             else:
                 mae = rmse = mape = 0.0
                 over_200_count = 0
+
             print(f"   MAE: {mae:.2f}cm, MAPE: {mape:.2f}%({over_200_count}), RMSE: {rmse:.2f}cm")
             mae_dict[connection_key] = mae
             rmse_dict[connection_key] = rmse

@@ -54,14 +54,26 @@ def save_framewise_plot(gt_dict, pred_dict, output_dir, connection_labels, title
     os.makedirs(output_dir, exist_ok=True)
     for conn in pred_dict.keys():
         pred = np.array(pred_dict[conn])
-        gt = np.array(gt_dict[conn])
-        if len(pred) == 0 or len(gt) == 0:
+        gt_data = gt_dict.get(conn, [])
+        if len(pred) == 0 or len(gt_data) == 0:
             continue
+            
         label = connection_labels.get(conn, conn)
         frame_indices = np.arange(len(pred))
         plt.figure(figsize=(10, 4))
-        plt.scatter(frame_indices, pred, label='Measured', color='blue')
-        plt.plot(frame_indices, gt, label='Ground Truth', linestyle='--', color='red')
+        plt.scatter(frame_indices, pred, label='Measured', color='blue', s=10) # s for marker size
+        
+        # Check if GT is a range or a single line
+        if gt_data and isinstance(gt_data[0], list):
+            # GT is a range [min, max]
+            gt_min = np.array([item[0] for item in gt_data])
+            gt_max = np.array([item[1] for item in gt_data])
+            plt.fill_between(frame_indices, gt_min, gt_max, color='red', alpha=0.3, label='Ground Truth Range')
+        else:
+            # GT is a single line
+            gt = np.array(gt_data)
+            plt.plot(frame_indices, gt, label='Ground Truth', linestyle='--', color='red')
+
         plt.xlabel('Frame')
         plt.ylabel('Length (cm)')
         plt.title(f'{conn} {label} : Measured vs Ground Truth')

@@ -2,9 +2,12 @@ import os
 import re
 import pandas as pd
 import numpy as np
+import matplotlib
+matplotlib.use('Agg') # GUI 백엔드 비활성화
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from math import pi
+import argparse
 
 # 1. analysis.out 파일 자동 탐색
 def find_analysis_out_files(root_dir):
@@ -23,28 +26,48 @@ def parse_metrics_from_file(filepath):
     current_skeleton = None
     for line in lines:
         line = line.strip()
-        # 스켈레톤 이름: "Nose-Left Eye" 등 (공백 포함, 콜론 없음)
-        if line and ':' not in line and 'cm' not in line and 'Data Count' not in line:
-            current_skeleton = line
+        # 스켈레톤 이름 (e.g., "Shoulder connection")
+        if line and ':' not in line and not any(keyword in line for keyword in ['cm', 'Data Count', 'Average', 'Standard', 'Range', 'Overall', 'applied', 'Statistics', '---']):
+            current_skeleton = line.strip()
+
         # MAE, RMSE, MAPE가 있는 줄
         if line.startswith('MAE:') and current_skeleton:
-            m = re.match(r'MAE: ([\d.]+)cm, RMSE: ([\d.]+)cm, MAPE: ([\d.]+)%', line)
-            if m:
-                mae = float(m.group(1))
-                rmse = float(m.group(2))
-                mape = float(m.group(3))
+            # 정규식을 사용하여 MAE, RMSE, MAPE 값 추출
+            mae_match = re.search(r'MAE: ([\d.]+)cm', line)
+            rmse_match = re.search(r'RMSE: ([\d.]+)cm', line)
+            mape_match = re.search(r'MAPE: ([\d.]+)%', line)
+
+            if mae_match and rmse_match and mape_match:
+                mae = float(mae_match.group(1))
+                rmse = float(rmse_match.group(1))
+                mape = float(mape_match.group(1))
                 metrics[current_skeleton] = {'MAE': mae, 'RMSE': rmse, 'MAPE': mape}
+                current_skeleton = None  # 하나의 스켈레톤 처리가 끝나면 초기화
     return metrics
 
 # 3. 데이터 정리 및 통합
-def collect_all_metrics(root_dir):
+def collect_all_metrics(root_dir, exclude_dirs=None):
+    if exclude_dirs is None:
+        exclude_dirs = []
     files = find_analysis_out_files(root_dir)
     all_data = {}
     for f in files:
-        # 상위 폴더명(예: video_1-upperbody-l) 추출
-        key = f.split(os.sep)[1]
+        # root_dir로부터의 상대 경로를 사용하여 key 추출 (안정적인 방식)
+        relative_path = os.path.relpath(os.path.dirname(f), root_dir)
+        key = relative_path.split(os.sep)[0]
+
+        # 제외할 디렉토리인지 확인
+        if key in exclude_dirs:
+            print(f"Skipping excluded directory: {key}")
+            continue
+        
         metrics = parse_metrics_from_file(f)
-        all_data[key] = metrics
+
+        if key not in all_data:
+            all_data[key] = {}
+        
+        # 같은 키(실험)에 여러 analysis.out 파일이 있을 수 있으므로, metrics를 합침
+        all_data[key].update(metrics)
     return all_data
 
 # 4. 시각화 함수
@@ -106,17 +129,34 @@ def plot_radar(df, save_dir):
 
 # 5. 메인 실행
 def main():
+    parser = argparse.ArgumentParser(description="Analyze and visualize metrics from 'analysis.out' files.")
+    parser.add_argument('--exclude', nargs='+', help='List of directories to exclude from analysis.')
+    args = parser.parse_args()
+
     root_dir = '.'
-    all_data = collect_all_metrics(root_dir)
-    print('all_data:', all_data)
+    all_data = collect_all_metrics(root_dir, exclude_dirs=args.exclude)
+    
+    if not all_data:
+        print("No data could be collected. Exiting.")
+        return
+
     # Convert to DataFrame
     df = pd.DataFrame.from_dict({(i,j): all_data[i][j] 
                                  for i in all_data.keys() 
                                  for j in all_data[i].keys()}, orient='index')
+
+    if df.empty:
+        print("DataFrame is empty. Cannot generate plots.")
+        return
+
     df.index = pd.MultiIndex.from_tuples(df.index, names=['Directory', 'Skeleton'])
     df = df.sort_index()
     df = df.unstack('Skeleton')
-    print(df.columns)
+    
+    if df.empty:
+        print("Unstacked DataFrame is empty. Cannot generate plots.")
+        return
+
     # bar plot
     plot_bar(df, './compare/bar')
     # radar plot

@@ -5,6 +5,7 @@ import argparse
 import os
 from typing import Tuple, List, Dict
 import sys
+import json
 
 from utils import PoseVisualizer, KeypointFilter, ImagePreprocessor, DepthProcessor, Analysis, AnomalyDetector
 from utils.visualization_analysis import save_boxplot, save_histogram, save_framewise_plot
@@ -26,7 +27,24 @@ class ImageDepthPoseInference:
         {"key": "7-9", "label": "Right Pelvis-Right Knee", "group": "lower_body"},
         {"key": "9-11", "label": "Right Knee-Right Ankle", "group": "lower_body"},
     ]
-    GROUND_TRUTH_CM = {c["key"]: v for c, v in zip(COCO_CONNECTIONS, [26.3, 21.3, 21.3, 21.6, 21.2, 43.7, 43.5, 11.8, 30.7, 35.3, 31.6, 34.2])}
+    
+    GROUND_TRUTH_CM = {c["key"]: v for c, v in zip(COCO_CONNECTIONS, [27.3, 21.9, 21.2, 21.8, 21.4, 43.4, 43.5, 11.5, 31.9, 32.9, 31.8, 32.9])}
+
+    # Users can directly edit the mean and std for each connection here.
+    CUSTOM_GROUND_TRUTH_CONFIG = {
+        "0-1": {"mean": 27.3, "std": 4.9},
+        "0-2": {"mean": 21.9, "std": 2.9},
+        "2-4": {"mean": 21.2, "std": 2.8},
+        "1-3": {"mean": 21.8, "std": 2.9},
+        "3-5": {"mean": 21.4, "std": 2.6},
+        "0-6": {"mean": 43.4, "std": 4.5},
+        "1-7": {"mean": 43.5, "std": 4.4},
+        "6-7": {"mean": 11.5, "std": 2.9},
+        "6-8": {"mean": 31.9, "std": 4.4},
+        "8-10": {"mean": 32.9, "std": 3.8},
+        "7-9": {"mean": 31.8, "std": 4.5},
+        "9-11": {"mean": 32.9, "std": 4.0}
+    }
 
     DEPTH_TO_RGB_AFFINE_TRANSFORMS = dict(
         C001=np.array([[2.89310518e+00, -2.33353370e-02, 2.38200221e+02],
@@ -40,11 +58,12 @@ class ImageDepthPoseInference:
                        [0.00000000e+00, 0.00000000e+00, 1.00000000e+00]]),
     )
 
-    def __init__(self, onnx_model_path: str, use_extension: bool = False, window_size: int = 5):
+    def __init__(self, onnx_model_path: str, ground_truth_data: Dict, use_extension: bool = False, window_size: int = 5):
         """Initialize the 3D pose inference system.
 
         Args:
             onnx_model_path (str): ONNX model file path
+            ground_truth_data (Dict): Dictionary for ground truth. Can be single values or ranges.
             use_extension (bool): Flag to enable/disable the anomaly detection extension
             window_size (int): Window size for the anomaly detector
         """
@@ -96,7 +115,9 @@ class ImageDepthPoseInference:
         self.preprocessor = ImagePreprocessor()
         self.depth_processor = DepthProcessor()
         self.reporter = Analysis(
-            self.COCO_CONNECTIONS, self.GROUND_TRUTH_CM, self.keypoint_names
+            self.COCO_CONNECTIONS,
+            ground_truth_data,
+            self.keypoint_names
         )
                 
         self.use_extension = use_extension
@@ -173,17 +194,8 @@ class ImageDepthPoseInference:
         # Postprocessing (2D keypoints)
         keypoints_2d_all_17 = self.keypoint_filter.postprocess_simcc_output(outputs, (image.shape[0], image.shape[1]))
         
-        # --- DEBUG START ---
-        print(f"DEBUG: Image: {os.path.basename(image_path)}")
-        print(f"DEBUG: keypoints_2d_all_17 (x, y, conf):\n{keypoints_2d_all_17}")
-        # --- DEBUG END ---
-        
         # Filter to keep only the body keypoints (indices 5-16)
         keypoints_2d = keypoints_2d_all_17[self.keypoints_to_use_indices]
-        
-        # --- DEBUG START ---
-        print(f"DEBUG: keypoints_2d (12 body keypoints, x, y, conf):\n{keypoints_2d}")
-        # --- DEBUG END ---
         
         # Calculate 3D keypoints (in meters) for the 12 body keypoints
         keypoints_3d = self.depth_processor.get_keypoint_3d_coords(
@@ -335,6 +347,10 @@ def main():
                         help="Output directory path (default: ./output)")
     parser.add_argument("--png_depth_dir", type=str, default=None,
                         help="Root directory for PNG depth files. If provided, this will be used instead of the 'bin' directory.")
+    parser.add_argument("--use_custom_range_gt", action="store_true",
+                        help="Use the hardcoded CUSTOM_GROUND_TRUTH_CONFIG for range-based GT.")
+    parser.add_argument("--gt_range_multiplier", type=float, default=1.0,
+                        help="Multiplier for std deviation when calculating range GT. (Default: 1.0)")
     parser.add_argument("--details", action="store_true",
                         help="Print detailed keypoint depth information for each frame")
     parser.add_argument("--trim_ratio", type=float, default=0.1,
@@ -346,10 +362,29 @@ def main():
 
     args = parser.parse_args()
     
+    # --- Ground Truth Data Loading Logic ---
+    ground_truth_data = ImageDepthPoseInference.GROUND_TRUTH_CM
+    if args.use_custom_range_gt:
+        print("Using custom range-based GT defined in the code.")
+        config = ImageDepthPoseInference.CUSTOM_GROUND_TRUTH_CONFIG
+        
+        range_gt = {}
+        for key, values in config.items():
+            mean = values['mean']
+            std = values['std']
+            multiplier = args.gt_range_multiplier
+            min_val = mean - multiplier * std
+            max_val = mean + multiplier * std
+            range_gt[key] = [min_val, max_val]
+        
+        ground_truth_data = range_gt
+        print(f"Successfully calculated custom range GT for {len(range_gt)} connections using a multiplier of {multiplier}.")
+
     # Initialize the inference system with extension flag
     try:
         inference_system = ImageDepthPoseInference(
             onnx_model_path=args.model,
+            ground_truth_data=ground_truth_data,
             use_extension=args.use_extension,
             window_size=args.window_size
         )
