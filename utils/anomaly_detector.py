@@ -32,18 +32,15 @@ class AnomalyDetector:
         if not all_results:
             return []
 
-        # 1. Restructure data: Group measurements by connection key
         connection_lengths = defaultdict(lambda: [None] * len(all_results))
         for i, result in enumerate(all_results):
             for key, distance in result.get('distances_meters', {}).items():
                 connection_lengths[key][i] = distance * 100.0  # Work with cm
 
-        # 2. Detect and correct anomalies for each connection
         corrected_lengths = {}
         for key, lengths in connection_lengths.items():
             corrected_lengths[key] = self._correct_series(lengths)
 
-        # 3. Reconstruct all_results with corrected values
         corrected_all_results = []
         for i, original_result in enumerate(all_results):
             new_result = original_result.copy()
@@ -60,7 +57,7 @@ class AnomalyDetector:
         """Applies anomaly detection and correction to a single time series."""
         
         if self.window_size == -1:
-            # Global correction: Calculate stats once from the entire series
+            # Calculate stats once from the entire series
             valid_values = [v for v in series if v is not None]
             if len(valid_values) < 2:
                 # Not enough data to correct, return original series
@@ -108,13 +105,13 @@ class AnomalyDetector:
                 median = np.median(valid_so_far)
                 
                 is_anomaly = False
-                # Case 1: Current value is missing
+
                 if val is None:
                     is_anomaly = True
-                # Case 2: We have enough data to calculate Z-score
+
                 elif len(valid_so_far) > 1:
                     std = np.std(valid_so_far)
-                    # Only check for anomaly if std is not zero
+
                     if std > 0:
                 z_score = (val - mean) / std
                 if abs(z_score) > self.z_threshold:
@@ -129,7 +126,7 @@ class AnomalyDetector:
         else: # Use sliding window
             for i in range(len(series)):
                 start = max(0, i - self.window_size + 1)
-                # 윈도우 내에서 현재 프레임(i)은 제외
+
                 window = [x for x in series[start:i] if x is not None]
 
                 if len(window) == 0:

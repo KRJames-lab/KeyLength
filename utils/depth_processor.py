@@ -16,7 +16,6 @@ class DepthProcessor:
         self.cx = 314.991790771484  # Actual principal point x (PPX)
         self.cy = 245.886520385742  # Actual principal point y (PPY)
         
-        # Lens distortion coefficients (Brown-Conrady model)
         self.distortion_coeffs = np.array([
             0.164545848965645,      # k1
             -0.503093838691711,     # k2
@@ -25,7 +24,6 @@ class DepthProcessor:
             0.462810575962067       # k3
         ])
         
-        # Camera matrix generation
         self.camera_matrix = np.array([
             [self.fx, 0, self.cx],
             [0, self.fy, self.cy],
@@ -224,7 +222,7 @@ class DepthProcessor:
         """
         print(f"Searching for PNG depth files under: {png_depth_root_dir}")
         
-        # 1. Build a map of all available PNG depth files
+        # Build a map of all available PNG depth files
         depth_map = {}  # Key: (action_name, frame_number), Value: full_path
         for root, _, files in os.walk(png_depth_root_dir):
             for file in files:
@@ -247,7 +245,7 @@ class DepthProcessor:
         if not depth_map:
             print("Warning: No valid PNG depth files found. Check the directory structure and file names.")
 
-        # 2. Get image file list and match with depth map
+        # Get image file list and match with depth map
         image_files = []
         for ext in ['.jpg', '.jpeg', '.png', '.bmp']:
             image_files.extend([f for f in os.listdir(images_dir) if f.lower().endswith(ext)])
