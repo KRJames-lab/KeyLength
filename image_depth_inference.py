@@ -27,7 +27,7 @@ class ImageDepthPoseInference:
         {"key": "7-9", "label": "Right Pelvis-Right Knee", "group": "lower_body"},
         {"key": "9-11", "label": "Right Knee-Right Ankle", "group": "lower_body"},
     ]
-    
+
     GROUND_TRUTH_CM = {c["key"]: v for c, v in zip(COCO_CONNECTIONS, [27.3, 21.9, 21.2, 21.8, 21.4, 43.4, 43.5, 11.5, 31.9, 32.9, 31.8, 32.9])}
 
     # Users can directly edit the mean and std for each connection here.

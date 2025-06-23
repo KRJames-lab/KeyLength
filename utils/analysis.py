@@ -195,13 +195,13 @@ class Analysis:
 
                 else:
                     # Single value error calculation (existing logic)
-                    abs_err = np.abs(trimmed_data - gt)
-                    mae = np.mean(abs_err)
-                    rmse = np.sqrt(np.mean((trimmed_data - gt) ** 2))
-                    mape = np.mean(abs_err / gt * 100) if gt != 0 else 0.0
-                    # Count the number of frames with APE over 200%
-                    ape = abs_err / gt * 100 if gt != 0 else np.zeros_like(abs_err)
-                    over_200_count = int(np.sum(ape > 200))
+                abs_err = np.abs(trimmed_data - gt)
+                mae = np.mean(abs_err)
+                rmse = np.sqrt(np.mean((trimmed_data - gt) ** 2))
+                mape = np.mean(abs_err / gt * 100) if gt != 0 else 0.0
+                # Count the number of frames with APE over 200%
+                ape = abs_err / gt * 100 if gt != 0 else np.zeros_like(abs_err)
+                over_200_count = int(np.sum(ape > 200))
             else:
                 mae = rmse = mape = 0.0
                 over_200_count = 0

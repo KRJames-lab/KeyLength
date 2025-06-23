@@ -296,7 +296,7 @@ class DepthProcessor:
                     print(f"  - Parsed from first image '{sample_img}': action='{action_name}', frame_idx={frame_idx}")
                     print(f"  - Looking for key: ('{action_name}', {frame_idx + 1})")
         return matched_pairs
-
+    
     def match_image_depth_files(self, images_dir: str, depth_dir: str) -> List[Tuple[str, str]]:
         """
         Match images and depth files in chronological order

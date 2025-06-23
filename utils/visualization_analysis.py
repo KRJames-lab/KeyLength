@@ -72,7 +72,7 @@ def save_framewise_plot(gt_dict, pred_dict, output_dir, connection_labels, title
         else:
             # GT is a single line
             gt = np.array(gt_data)
-            plt.plot(frame_indices, gt, label='Ground Truth', linestyle='--', color='red')
+        plt.plot(frame_indices, gt, label='Ground Truth', linestyle='--', color='red')
 
         plt.xlabel('Frame')
         plt.ylabel('Length (cm)')
