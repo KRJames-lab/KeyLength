@@ -113,8 +113,8 @@ class AnomalyDetector:
                     std = np.std(valid_so_far)
 
                     if std > 0:
-                z_score = (val - mean) / std
-                if abs(z_score) > self.z_threshold:
+                        z_score = (val - mean) / std
+                        if abs(z_score) > self.z_threshold:
                             is_anomaly = True
                 
                 if is_anomaly:
@@ -139,10 +139,10 @@ class AnomalyDetector:
                 if series[i] is None:
                     is_anomaly = True
                 elif len(window) > 1:
-                std = np.std(window)
+                    std = np.std(window)
                     if std > 0:
-                z_score = (series[i] - mean) / std
-                if abs(z_score) > self.z_threshold:
+                        z_score = (series[i] - mean) / std
+                        if abs(z_score) > self.z_threshold:
                             is_anomaly = True
                 
                 if is_anomaly:
