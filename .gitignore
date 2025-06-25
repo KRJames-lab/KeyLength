@@ -6,6 +6,15 @@
 /output/*
 !/output/
 !/output/compare_analysis.py
+
 !/output/boxplot_upper_body.png
 !/output/frameplot_1-3.png
 !/output/histogram_1-3.png
+
+!/output/compare/
+/output/compare/bar/*
+!/output/compare/bar/
+/output/compare/radar/*
+!/output/compare/radar/
+!/output/compare/bar/Left_Shoulder-Left_Elbow_bar_example.png
+!/output/compare/radar/Left_Shoulder-Left_Elbow_radar_example.png

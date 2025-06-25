@@ -56,13 +56,39 @@ and, also you can use **PNG** type for depth_matrix.
 You can set trimmed mean and Z-score anomaly detect. Refer to **[Args](#args)** for more information.
 ### Custom range Ground Truth
 The body dimension can not be same all time. If you want make the ground truth have range, modify [`CUSTOM_GROUND_TRUTH_CONFIG`](image_depth_inference.py#L40-L53) and use "*--use_custom_range_gt*".
-### Result
-This project provide **three types of graph** about result(Boxplot, frameplot and histogram). And also, analysis.out file provided too. The result include each skeleton's MAE, MAPE and RMSE.  
+## Result
+This project provides three types of visualization graphs and detailed analysis files for evaluating measurement results:
 
-**Frameplot example**  
+### 1. Analysis Graphs
+- **Boxplot**: Shows the distribution of measurements for each skeleton connection
+- **Histogram**: Displays the frequency distribution of measurements for each connection
+- **Frameplot**: Time-series graph comparing frame-by-frame measurements with ground truth values
+
+All graphs are generated separately for upper body and lower body groups.
+
+### 2. Analysis File
+The **analysis.out** file includes detailed statistical analysis:
+- Total frame count and valid frame ratio
+- Statistics for each skeleton connection:
+  - Average length
+  - Standard deviation
+  - Measurement range
+  - MAE
+  - RMSE
+  - MAPE
+
+**Frameplot Example**  
 ![Frameplot example](./output/frameplot_1-3.png)
 
+### 3. Comparative Analysis
+Use [output/compare_analysis.py](./output/compare_analysis.py) to compare multiple experimental results:
+- **Bar Graph**:  Bar graph for comparing measurements across experiments
+- **Radar Graph**: Normalized radar chart for visualizing performance metrics of each skeleton connection
 
+**Bar example**
+![Bar example](./output/compare/bar/Left_Shoulder-Left_Elbow_bar_example.png)
+
+*All results are saved in the `output` directory, with separate subdirectories created for each experiment.*
 ## Args
 
 | Argument                  | Description                                                                                              | Default Value        | Required |
