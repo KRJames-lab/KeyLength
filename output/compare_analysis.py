@@ -3,7 +3,7 @@ import re
 import pandas as pd
 import numpy as np
 import matplotlib
-matplotlib.use('Agg') # GUI 백엔드 비활성화
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from math import pi
