@@ -6,6 +6,7 @@ import os
 from typing import Tuple, List, Dict
 import sys
 import json
+import re
 
 from utils import PoseVisualizer, KeypointFilter, ImagePreprocessor, DepthProcessor, Analysis, AnomalyDetector
 from utils.visualization_analysis import save_boxplot, save_histogram, save_framewise_plot
@@ -32,18 +33,18 @@ class ImageDepthPoseInference:
 
     # Users can directly edit the mean and std for each connection here.
     CUSTOM_GROUND_TRUTH_CONFIG = {
-        "0-1": {"mean": 27.3, "std": 4.9},
-        "0-2": {"mean": 21.9, "std": 2.9},
-        "2-4": {"mean": 21.2, "std": 2.8},
-        "1-3": {"mean": 21.8, "std": 2.9},
-        "3-5": {"mean": 21.4, "std": 2.6},
-        "0-6": {"mean": 43.4, "std": 4.5},
-        "1-7": {"mean": 43.5, "std": 4.4},
-        "6-7": {"mean": 11.5, "std": 2.9},
-        "6-8": {"mean": 31.9, "std": 4.4},
-        "8-10": {"mean": 32.9, "std": 3.8},
-        "7-9": {"mean": 31.8, "std": 4.5},
-        "9-11": {"mean": 32.9, "std": 4.0}
+        "0-1": {"mean": 26.1, "std": 3.3},
+        "0-2": {"mean": 21.4, "std": 2.2},
+        "2-4": {"mean": 21.3, "std": 2.4},
+        "1-3": {"mean": 21.7, "std": 2.6},
+        "3-5": {"mean": 21.3, "std": 2.5},
+        "0-6": {"mean": 44.1, "std": 2.7},
+        "1-7": {"mean": 43.9, "std": 2.7},
+        "6-7": {"mean": 11.9, "std": 2.7},
+        "6-8": {"mean": 30.5, "std": 3.5},
+        "8-10": {"mean": 35.4, "std": 3.2},
+        "7-9": {"mean": 31.6, "std": 3.0},
+        "9-11": {"mean": 34.2, "std": 2.8}
     }
 
     DEPTH_TO_RGB_AFFINE_TRANSFORMS = dict(
@@ -123,11 +124,16 @@ class ImageDepthPoseInference:
         self.use_extension = use_extension
         self.window_size = window_size
         
-        self._load_model()
+        # self._load_model() # Model will be loaded on demand
     
     def _load_model(self):
         """Load ONNX model and check input/output information"""
         try:
+            if not self.onnx_model_path or not os.path.exists(self.onnx_model_path):
+                print(f"Error: Model file not found at '{self.onnx_model_path}'.")
+                self.session = None
+                return
+
             self.session = ort.InferenceSession(self.onnx_model_path)
             
             input_info = self.session.get_inputs()[0]
@@ -142,8 +148,72 @@ class ImageDepthPoseInference:
             
         except Exception as e:
             print(f"Model loading failed: {e}")
-            raise
+            self.session = None
     
+    def _load_depth_data(self, image_path: str, depth_path: str) -> np.ndarray:
+        """
+        Load depth data from a file (.png or .bin).
+        
+        Args:
+            image_path (str): Path to the corresponding color image to determine camera ID for PNG.
+            depth_path (str): Path to the depth file.
+            
+        Returns:
+            np.ndarray: Loaded depth image, or None if loading fails.
+        """
+        if depth_path.lower().endswith('.png'):
+            filename = os.path.basename(image_path)
+            camera_id = None
+            for cid in self.DEPTH_TO_RGB_AFFINE_TRANSFORMS.keys():
+                if cid in filename:
+                    camera_id = cid
+                    break
+            
+            if camera_id is None:
+                print(f"Could not determine camera ID from filename: {filename}. Skipping.")
+                return None
+
+            affine_transform = self.DEPTH_TO_RGB_AFFINE_TRANSFORMS[camera_id]
+            depth_image = self.depth_processor.read_depth_png(depth_path, affine_transform)
+        else:
+            depth_image = self.depth_processor.read_depth_bin(depth_path)
+
+        if depth_image is None or np.all(depth_image == 0):
+            print(f"Depth data loading or processing failed for: {depth_path}")
+            return None
+            
+        return depth_image
+
+    def _calculate_3d_from_2d(self, keypoints_2d_all_17: np.ndarray, depth_image: np.ndarray) -> Tuple[np.ndarray, np.ndarray, Dict]:
+        """
+        Calculate 3D keypoints and distances from 2D keypoints and a depth image.
+        
+        Args:
+            keypoints_2d_all_17 (np.ndarray): Array of 17 2D keypoints from model output.
+            depth_image (np.ndarray): Depth image.
+            
+        Returns:
+            Tuple[np.ndarray, np.ndarray, Dict]: (filtered_keypoints_2d, keypoints_3d, distances)
+        """
+        # Filter to keep only the body keypoints (indices 5-16)
+        keypoints_2d = keypoints_2d_all_17[self.keypoints_to_use_indices]
+        
+        # Calculate 3D keypoints (in meters) for the 12 body keypoints
+        keypoints_3d = self.depth_processor.get_keypoint_3d_coords(
+            keypoints_2d, depth_image
+        )
+        
+        # Calculate 3D distances between skeleton connections (in meters)
+        distances = {}
+        for start_idx, end_idx in self.skeleton_connections:
+            if start_idx < len(keypoints_3d) and end_idx < len(keypoints_3d):
+                distance = self.depth_processor.calculate_3d_distance(
+                    keypoints_3d[start_idx], keypoints_3d[end_idx]
+                )
+                distances[(start_idx, end_idx)] = distance
+        
+        return keypoints_2d, keypoints_3d, distances
+        
     def process_single_image(self, image_path: str, depth_path: str) -> Tuple[np.ndarray, np.ndarray, Dict]:
         """
         Process a single image and depth data.
@@ -161,28 +231,9 @@ class ImageDepthPoseInference:
             print(f"Image loading failed: {image_path}")
             return None, None, {}
 
-        # Load depth data based on file extension
-        if depth_path.lower().endswith('.png'):
-            # The camera ID is in the image filename, not the depth filename
-            filename = os.path.basename(image_path)
-            camera_id = None
-            for cid in self.DEPTH_TO_RGB_AFFINE_TRANSFORMS.keys():
-                if cid in filename:
-                    camera_id = cid
-                    break
-            
-            if camera_id is None:
-                print(f"Could not determine camera ID from filename: {filename}. Skipping.")
-                return None, None, {}
-
-            affine_transform = self.DEPTH_TO_RGB_AFFINE_TRANSFORMS[camera_id]
-            depth_image = self.depth_processor.read_depth_png(depth_path, affine_transform)
-        else:
-            # Assuming .bin file if not .png
-            depth_image = self.depth_processor.read_depth_bin(depth_path)
-
-        if depth_image is None or np.all(depth_image == 0):
-            print(f"Depth data loading or processing failed for: {depth_path}")
+        # Load depth data
+        depth_image = self._load_depth_data(image_path, depth_path)
+        if depth_image is None:
             return None, None, {}
         
         # Preprocessing
@@ -194,102 +245,199 @@ class ImageDepthPoseInference:
         # Postprocessing (2D keypoints)
         keypoints_2d_all_17 = self.keypoint_filter.postprocess_simcc_output(outputs, (image.shape[0], image.shape[1]))
         
-        # Filter to keep only the body keypoints (indices 5-16)
-        keypoints_2d = keypoints_2d_all_17[self.keypoints_to_use_indices]
-        
-        # Calculate 3D keypoints (in meters) for the 12 body keypoints
-        keypoints_3d = self.depth_processor.get_keypoint_3d_coords(
-            keypoints_2d, depth_image
-        )
-        
-        # Calculate 3D distances between skeleton connections (in meters)
-        distances = {}
-        for start_idx, end_idx in self.skeleton_connections:
-            if start_idx < len(keypoints_3d) and end_idx < len(keypoints_3d):
-                distance = self.depth_processor.calculate_3d_distance(
-                    keypoints_3d[start_idx], keypoints_3d[end_idx]
-                )
-                # Store all distances (both valid and invalid (-1))
-                distances[(start_idx, end_idx)] = distance
-        
-        return keypoints_2d, keypoints_3d, distances
+        # Calculate 3D coordinates and distances
+        return self._calculate_3d_from_2d(keypoints_2d_all_17, depth_image)
     
-    def process_dataset(self, dataset_path: str, output_dir: str = "./output", png_depth_dir: str = None, details: bool = False, trim_ratio: float = 0.1):
+    def process_dataset(self, dataset_path: str, output_dir: str = "./output", 
+                        png_depth_dir: str = None, details: bool = False, 
+                        trim_ratio: float = 0.1, json_input: str = None):
         """
-        Process the entire dataset.
-        
+        Processes a dataset of images, either from files or from a JSON input,
+        to perform pose estimation, calculate 3D distances, and save the results.
+
         Args:
             dataset_path (str): Dataset directory path
             output_dir (str): Output directory path (default: ./output)
             png_depth_dir (str, optional): Path to the root directory for PNG depth files. Defaults to None.
             details (bool): Whether to print detailed keypoint information
             trim_ratio (float): Ratio to trim from each end for statistics (e.g., 0.1 for 10%) (default: 0.1)
+            json_input (str, optional): Path to a JSON file or directory with pre-computed keypoints.
         """
-        # Extract input directory name
-        dataset_name = os.path.basename(os.path.normpath(dataset_path))
+        # --- Task Generation ---
+        tasks = []
+        dataset_name = ""
         
-        # Dataset directory structure
-        images_dir = os.path.join(dataset_path, "color_images")
+        if json_input:
+            # --- JSON-based processing ---
+            json_files_to_process = []
+            if os.path.isdir(json_input):
+                dataset_name = os.path.basename(os.path.normpath(json_input))
+                for f in sorted(os.listdir(json_input)):
+                    if f.endswith('.json'):
+                        json_files_to_process.append(os.path.join(json_input, f))
+            elif os.path.isfile(json_input):
+                dataset_name = os.path.splitext(os.path.basename(json_input))[0]
+                json_files_to_process.append(json_input)
+            else:
+                print(f"Error: JSON input path not found: {json_input}")
+                return
+
+            if not json_files_to_process:
+                print(f"Error: No .json files found in {json_input}")
+                return
+
+            # Build a map from image basenames to their corresponding depth file paths
+            images_dir = os.path.join(dataset_path, "color_images")
+            if not os.path.exists(images_dir):
+                print(f"Error: Image directory not found for dataset: {images_dir}")
+                return
+
+            file_pairs = []
+            if png_depth_dir:
+                if not os.path.exists(png_depth_dir):
+                    print(f"PNG depth directory not found: {png_depth_dir}")
+                    return
+                file_pairs = self.depth_processor.match_image_png_depth_files(images_dir, png_depth_dir)
+            else:
+                depth_dir = os.path.join(dataset_path, "bin")
+                if not os.path.exists(depth_dir):
+                    print(f"Depth data directory not found: {depth_dir}")
+                    return
+                file_pairs = self.depth_processor.match_image_depth_files(images_dir, depth_dir)
+
+            image_to_depth_map = {os.path.splitext(os.path.basename(img))[0]: dpt for img, dpt in file_pairs}
+
+            # Process each JSON file
+            for json_path in json_files_to_process:
+                with open(json_path, 'r') as f:
+                    data = json.load(f)
+
+                if isinstance(data, dict) and "instance_info" in data:
+                    base_name = os.path.splitext(os.path.basename(json_path))[0]
+                    
+                    if base_name not in image_to_depth_map:
+                        print(f"Warning: Skipping {json_path}. No matching image/depth pair found for basename '{base_name}'.")
+                        continue
+                    
+                    depth_path = image_to_depth_map[base_name]
+                    image_path = None
+                    for ext in ['.jpg', '.png', '.jpeg']:
+                        potential_path = os.path.join(images_dir, f"{base_name}{ext}")
+                        if os.path.exists(potential_path):
+                            image_path = potential_path
+                            break
+                    
+                    if not image_path:
+                        print(f"Warning: Skipping {json_path}. Image file for '{base_name}' not found.")
+                        continue
+
+                    # Parse keypoints from JSON
+                    instance = data['instance_info'][0] # Assume first instance
+                    keypoints_2d = instance.get('keypoints')
+                    keypoint_scores = instance.get('keypoint_scores')
+
+                    if not keypoints_2d or not keypoint_scores:
+                        print(f"Warning: Keypoint data missing in {json_path}. Skipping.")
+                        continue
+                        
+                    keypoints_2d_all_17 = np.hstack([np.array(keypoints_2d), np.array(keypoint_scores)[:, np.newaxis]]).tolist()
+
+                    tasks.append({
+                        "image_path": image_path,
+                        "depth_path": depth_path,
+                        "keypoints_2d_all_17": keypoints_2d_all_17
+                    })
+                else:
+                    print(f"Warning: Unsupported JSON format in {json_path}. Skipping. Expected format with 'instance_info'.")
+
+            print(f"Successfully created {len(tasks)} tasks from {json_input}")
+
+        else:
+            # --- Inference-based processing ---
+            if self.session is None:
+                print("Loading ONNX model for inference...")
+                self._load_model()
+                if self.session is None:
+                    print("Aborting: Model could not be loaded.")
+                    return
+
+            dataset_name = os.path.basename(os.path.normpath(dataset_path))
+            images_dir = os.path.join(dataset_path, "color_images")
+            if not os.path.exists(images_dir):
+                print(f"Image directory not found: {images_dir}")
+                return
+
+            file_pairs = []
+            if png_depth_dir:
+                if not os.path.exists(png_depth_dir):
+                    print(f"PNG depth directory not found: {png_depth_dir}")
+                    return
+                file_pairs = self.depth_processor.match_image_png_depth_files(images_dir, png_depth_dir)
+            else:
+                depth_dir = os.path.join(dataset_path, "bin")
+                if not os.path.exists(depth_dir):
+                    print(f"Depth data directory not found: {depth_dir}")
+                    return
+                file_pairs = self.depth_processor.match_image_depth_files(images_dir, depth_dir)
+
+            for img_path, dpt_path in file_pairs:
+                tasks.append({"image_path": img_path, "depth_path": dpt_path})
         
-        if not os.path.exists(images_dir):
-            print(f"Image directory not found: {images_dir}")
+        if not tasks:
+            print("No matching files or tasks found.")
             return
 
-        if png_depth_dir:
-            if not os.path.exists(png_depth_dir):
-                print(f"PNG depth directory not found: {png_depth_dir}")
-                return
-            file_pairs = self.depth_processor.match_image_png_depth_files(images_dir, png_depth_dir)
-        else:
-            depth_dir = os.path.join(dataset_path, "bin")
-            if not os.path.exists(depth_dir):
-                print(f"Depth data directory not found: {depth_dir}")
-                return
-            file_pairs = self.depth_processor.match_image_depth_files(images_dir, depth_dir)
-        
-        if len(file_pairs) == 0:
-            print("No matching files found.")
-            return
-        
-        # Create output directories
+        # --- Directory and Result Setup ---
         results_dir = os.path.join(output_dir, f"{dataset_name}_result")
         os.makedirs(results_dir, exist_ok=True)
-        
-        # Create result_images directory for visualization results
         result_images_dir = os.path.join(results_dir, "result_images")
         os.makedirs(result_images_dir, exist_ok=True)
-        
-        # List for storing results
         all_results = []
         
-        print(f"Processing started: {len(file_pairs)} files")
+        print(f"Processing started: {len(tasks)} files")
         
-        for i, (image_path, depth_path) in enumerate(file_pairs):
-            if (i + 1) % 10 == 0 or i == 0:  # Print every 10th or first
-                print(f"   Progress: {i+1}/{len(file_pairs)}")
+        # --- Main Processing Loop ---
+        for i, task in enumerate(tasks):
+            if (i + 1) % 10 == 0 or i == 0:
+                print(f"   Progress: {i+1}/{len(tasks)}")
+
+            image_path = task["image_path"]
+            depth_path = task["depth_path"]
             
-            # Process single image
-            keypoints_2d, keypoints_3d, distances = self.process_single_image(image_path, depth_path)
+            image = cv2.imread(image_path)
+            if image is None:
+                print(f"Image loading failed: {image_path}, skipping.")
+                continue
+
+            depth_image = self._load_depth_data(image_path, depth_path)
+            if depth_image is None:
+                print(f"Depth loading failed for {depth_path}, skipping.")
+                continue
+
+            if "keypoints_2d_all_17" in task:
+                # Case 1: Keypoints are pre-computed in the JSON file
+                keypoints_2d_all_17 = np.array(task["keypoints_2d_all_17"])
+            else:
+                # Case 2: Run inference to get keypoints
+                input_tensor = self.preprocessor.preprocess_frame(image)
+                outputs = self.session.run(self.output_names, {self.input_name: input_tensor})
+                keypoints_2d_all_17 = self.keypoint_filter.postprocess_simcc_output(outputs, (image.shape[0], image.shape[1]))
+
+            # Calculate 3D coordinates and distances from 2D keypoints and depth
+            keypoints_2d, keypoints_3d, distances = self._calculate_3d_from_2d(keypoints_2d_all_17, depth_image)
             
             if keypoints_2d is not None:
-                # Print detailed information (keypoint depths)
                 if details:
                     self._print_single_image_keypoint_depths(i, os.path.basename(image_path), keypoints_3d, distances)
                 
-                # Load original image
-                image = cv2.imread(image_path)
-                
-                # Visualization (display distances in centimeters)
                 result_image = self.visualizer.draw_pose_with_distances(
                     image, keypoints_2d, distances, confidence_threshold=0.3, distance_unit="cm"
                 )
                 
-                # Save result image in result_images directory
                 result_filename = f"result_{i:04d}_{os.path.basename(image_path)}"
                 result_path = os.path.join(result_images_dir, result_filename)
                 cv2.imwrite(str(result_path), result_image)
                 
-                # Save result data
                 result_data = {
                     "frame_id": i,
                     "image_path": image_path,
@@ -300,7 +448,7 @@ class ImageDepthPoseInference:
                 }
                 all_results.append(result_data)
         
-        # Anomaly Detection and Correction
+        # --- Anomaly Detection and Reporting ---
         if self.use_extension:
             print(f"Applying anomaly detection with window size W={self.window_size}...")
             detector = AnomalyDetector(window_size=self.window_size)
@@ -323,7 +471,7 @@ class ImageDepthPoseInference:
         """Print detailed information for a single image"""
         print(f"\nFrame {frame_id} ({image_file}):")
         print("-" * 40)
-        print("Keypoint Depths:")
+        print("Keypoint Depths:")       
         for i, (x, y, depth, conf) in enumerate(keypoints_3d):
             if conf > 0.3:
                 keypoint_name = self.keypoint_names.get(i, f"Unknown {i}")
@@ -337,32 +485,22 @@ class ImageDepthPoseInference:
                 print(f"   {start_name}-{end_name}: {dist:.3f}m")
 
 def main():
-    """Main function"""
-    parser = argparse.ArgumentParser(description="3D Pose Inference from Image and Depth Data")
-    parser.add_argument("--model", type=str, default="./onnx/model.onnx",
-                        help="ONNX model file path")
-    parser.add_argument("--dataset", type=str, required=True,
-                        help="Dataset directory path")
-    parser.add_argument("--output", type=str, default="./output",
-                        help="Output directory path (default: ./output)")
-    parser.add_argument("--png_depth_dir", type=str, default=None,
-                        help="Root directory for PNG depth files. If provided, this will be used instead of the 'bin' directory.")
-    parser.add_argument("--use_custom_range_gt", action="store_true",
-                        help="Use the hardcoded CUSTOM_GROUND_TRUTH_CONFIG for range-based GT.")
-    parser.add_argument("--gt_range_multiplier", type=float, default=1.0,
-                        help="Multiplier for std deviation when calculating range GT. (Default: 1.0)")
-    parser.add_argument("--details", action="store_true",
-                        help="Print detailed keypoint depth information for each frame")
-    parser.add_argument("--trim_ratio", type=float, default=0.1,
-                        help="Ratio to trim from each end of the data for statistical analysis (e.g., 0.1 for 10%)")
-    parser.add_argument("--use_extension", action="store_true", 
-                        help="Enable the anomaly detection and correction extension")
-    parser.add_argument("--window_size", type=int, default=5, 
-                        help="Window size for the anomaly detector extension")
+    parser = argparse.ArgumentParser(description="3D Pose Estimation from Image and Depth Data")
+    parser.add_argument('--model', type=str, default='./onnx/model.onnx', help='Path to ONNX model')
+    parser.add_argument('--dataset', type=str, default='./datasets/img_with_depth', help='Path to dataset directory')
+    parser.add_argument('--output', type=str, default='./output', help='Path to output directory')
+    parser.add_argument('--png_depth_dir', type=str, default=None, help='Path to the root directory for PNG depth files if they are in a separate location.')
+    parser.add_argument('--use_custom_range_gt', action='store_true', help='Use the hardcoded CUSTOM_GROUND_TRUTH_CONFIG for range-based GT.')
+    parser.add_argument('--gt_range_multiplier', type=float, default=1.0, help='Multiplier for std deviation when calculating range GT. (Default: 1.0)')
+    parser.add_argument('--details', action='store_true', help='Print detailed keypoint information for each frame')
+    parser.add_argument('--use_extension', action='store_true', help='A flag to enable the anomaly detection and correction feature on the calculated distances.')
+    parser.add_argument('--window_size', type=int, default=5, help='The window size for the anomaly detector. Set to -1 for global, 0 for cumulative, >0 for sliding window.')
+    parser.add_argument('--trim', type=float, default=0.1, help='Trim ratio for statistical calculations (e.g., 0.1 for 10%% trim from each end).')
+    parser.add_argument('--json', type=str, default=None, help='Path to a JSON file or directory with pre-computed keypoints. If provided, model inference is skipped.')
 
     args = parser.parse_args()
     
-    # --- Ground Truth Data Loading Logic ---
+    # Ground Truth 데이터 로드 또는 설정
     ground_truth_data = ImageDepthPoseInference.GROUND_TRUTH_CM
     if args.use_custom_range_gt:
         print("Using custom range-based GT defined in the code.")
@@ -380,9 +518,9 @@ def main():
         ground_truth_data = range_gt
         print(f"Successfully calculated custom range GT for {len(range_gt)} connections using a multiplier of {multiplier}.")
 
-    # Initialize the inference system with extension flag
+    # Initialize the inference system
     try:
-        inference_system = ImageDepthPoseInference(
+        processor = ImageDepthPoseInference(
             onnx_model_path=args.model,
             ground_truth_data=ground_truth_data,
             use_extension=args.use_extension,
@@ -390,16 +528,16 @@ def main():
         )
     except Exception as e:
         print(f"Initialization failed: {e}")
-        sys.exit(1)
-
-    # Process the entire dataset
-    inference_system.process_dataset(
-        dataset_path=args.dataset,
+        return
+    
+    processor.process_dataset(
+        dataset_path=args.dataset, 
         output_dir=args.output,
         png_depth_dir=args.png_depth_dir,
         details=args.details,
-        trim_ratio=args.trim_ratio
+        trim_ratio=args.trim,
+        json_input=args.json
     )
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main() 

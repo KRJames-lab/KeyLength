@@ -14,7 +14,7 @@ def save_boxplot(errors_dict, output_dir, title_prefix=""):
     connections = list(errors_dict.keys())
     data = [errors_dict[c] for c in connections]
     plt.figure(figsize=(max(10, len(connections)*0.7), 6))
-    sns.boxplot(data=data)
+    sns.boxplot(data=data, showfliers=False)
     plt.xticks(range(len(connections)), connections, rotation=45)
     plt.ylabel('Error (cm)')
     plt.title(f'{title_prefix} : Error Distribution (Boxplot)')
@@ -72,7 +72,7 @@ def save_framewise_plot(gt_dict, pred_dict, output_dir, connection_labels, title
         else:
             # GT is a single line
             gt = np.array(gt_data)
-        plt.plot(frame_indices, gt, label='Ground Truth', linestyle='--', color='red')
+            plt.plot(frame_indices, gt, label='Ground Truth', linestyle='--', color='red')
 
         plt.xlabel('Frame')
         plt.ylabel('Length (cm)')

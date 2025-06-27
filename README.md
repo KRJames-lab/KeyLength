@@ -100,6 +100,7 @@ Use [output/compare_analysis.py](./output/compare_analysis.py) to compare multip
 | `--use_custom_range_gt`   | A flag to enable range-based Ground Truth (GT) using the `CUSTOM_GROUND_TRUTH_CONFIG` in the code.         | `False`              | No       |
 | `--gt_range_multiplier`   | A multiplier for the standard deviation when calculating range-based GT. Only active if `--use_custom_range_gt` is set. | `1.0`                | No       |
 | `--details`               | A flag to print detailed keypoint depth and distance information for each frame to the console.          | `False`              | No       |
-| `--trim_ratio`            | The ratio of data to trim from each end (min and max) for statistical analysis (e.g., 0.1 for 10%).      | `0.1`                | No       |
+| `--trim`            | The ratio of data to trim from each end (min and max) for statistical analysis (e.g., 0.1 for 10%).      | `0.1`                | No       |
 | `--use_extension`         | A flag to enable the anomaly detection and correction feature on the calculated distances.                 | `False`              | No       |
 | `--window_size`           | The window size for the anomaly detector. Set to `-1` for global, `0` for cumulative, `>0` for sliding window. | `5`                  | No       |
+| `--json`           | Path to the json file directory which contains keypooint coordinates. Use this argument if already have information about keypoints. | `None`                  | No       |

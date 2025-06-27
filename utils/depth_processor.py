@@ -7,29 +7,28 @@ import re
 
 class DepthProcessor:
     """Depth data processing and 3D coordinate calculation"""
-    
+
     def __init__(self):
         """Initialization (actual camera parameter usage)"""
-        # Actual RGB camera internal parameters
-        self.fx = 596.901611328125  # Actual focal length x
-        self.fy = 597.372497558594  # Actual focal length y
-        self.cx = 314.991790771484  # Actual principal point x (PPX)
-        self.cy = 245.886520385742  # Actual principal point y (PPY)
-        
-        self.distortion_coeffs = np.array([
-            0.164545848965645,      # k1
-            -0.503093838691711,     # k2
-            -0.000860264350194484,  # p1
-            -0.000300821207929403,  # p2
-            0.462810575962067       # k3
-        ])
+        self.fx = 1081.37  # Actual focal length x
+        self.fy = 1081.37  # Actual focal length y
+        self.cx = 9.61623105e+02    # Actual principal point x (PPX)
+        self.cy = 5.73459481e+02    # Actual principal point y (PPY)
         
         self.camera_matrix = np.array([
-            [self.fx, 0, self.cx],
-            [0, self.fy, self.cy],
+            [self.fx, 0, self.cx],  # [fx, 0, cx]
+            [0, self.fy, self.cy],  # [0, fy, cy]
             [0, 0, 1]
         ])
-    
+        
+        self.distortion_coeffs = np.array([
+            0.04426,      # k1
+            0.03956,     # k2
+            -0.00006,  # p1
+            -0.00064,  # p2
+            0.462810575962067       # k3
+        ])
+
     def read_depth_png(self, png_path: str, affine_transform: np.ndarray) -> np.ndarray:
         """
         Read a 16-bit PNG depth file, apply affine transformation, and convert to meters.

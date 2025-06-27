@@ -65,14 +65,13 @@ class AnomalyDetector:
             
             global_mean = np.mean(valid_values)
             global_std = np.std(valid_values)
-            global_median = np.median(valid_values)
             
             corrected_series = list(series)
             if global_std == 0:
-                # If all values are the same, fill Nones with the median
+                # If all values are the same, fill Nones with the mean
                 for i, val in enumerate(corrected_series):
                     if val is None:
-                        corrected_series[i] = global_median
+                        corrected_series[i] = global_mean
                 return corrected_series
 
             for i, val in enumerate(corrected_series):
@@ -85,7 +84,7 @@ class AnomalyDetector:
                         is_anomaly = True
                 
                 if is_anomaly:
-                    corrected_series[i] = global_median
+                    corrected_series[i] = global_mean
             
             return corrected_series
 
@@ -102,7 +101,6 @@ class AnomalyDetector:
                     continue
 
                 mean = np.mean(valid_so_far)
-                median = np.median(valid_so_far)
                 
                 is_anomaly = False
 
@@ -118,8 +116,8 @@ class AnomalyDetector:
                             is_anomaly = True
                 
                 if is_anomaly:
-                    corrected_series[i] = median
-                    valid_so_far.append(median)
+                    corrected_series[i] = mean
+                    valid_so_far.append(mean)
                 else:
                     valid_so_far.append(val)
         
@@ -133,7 +131,6 @@ class AnomalyDetector:
                     continue
 
                 mean = np.mean(window)
-                median = np.median(window)
 
                 is_anomaly = False
                 if series[i] is None:
@@ -146,5 +143,5 @@ class AnomalyDetector:
                             is_anomaly = True
                 
                 if is_anomaly:
-                    corrected_series[i] = median
+                    corrected_series[i] = mean
         return corrected_series 
