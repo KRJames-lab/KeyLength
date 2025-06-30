@@ -57,7 +57,14 @@ You can set trimmed mean and Z-score anomaly detect. Refer to **[Args](#args)** 
 ### Custom range Ground Truth
 The body dimension can not be same all time. If you want make the ground truth have range, modify [`CUSTOM_GROUND_TRUTH_CONFIG`](image_depth_inference.py#L40-L53) and use "*--use_custom_range_gt*".
 ## Result
-This project provides three types of visualization graphs and detailed analysis files for evaluating measurement results:
+This project provides three types of visualization graphs and detailed analysis files for evaluating measurement results:  
+
+For the calculation of Precision and Recall, the terms are defined as follows:
+- **Positive**: A distance was successfully measured between two keypoints.
+- **Negative**: The distance could not be measured due to missing keypoints.
+- **True Positive (TP)**: The measured distance is within the acceptable error range of the ground truth.
+- **False Positive (FP)**: The measured distance is outside the acceptable error range.
+- **False Negative (FN)**: The distance was not measured when it should have been.
 
 ### 1. Analysis Graphs
 - **Boxplot**: Shows the distribution of measurements for each skeleton connection
