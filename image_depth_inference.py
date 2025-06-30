@@ -250,7 +250,8 @@ class ImageDepthPoseInference:
     
     def process_dataset(self, dataset_path: str, output_dir: str = "./output", 
                         png_depth_dir: str = None, details: bool = False, 
-                        trim_ratio: float = 0.1, json_input: str = None):
+                        trim_ratio: float = 0.1, json_input: str = None,
+                        accuracy_threshold_cm: float = 5.0):
         """
         Processes a dataset of images, either from files or from a JSON input,
         to perform pose estimation, calculate 3D distances, and save the results.
@@ -262,6 +263,7 @@ class ImageDepthPoseInference:
             details (bool): Whether to print detailed keypoint information
             trim_ratio (float): Ratio to trim from each end for statistics (e.g., 0.1 for 10%) (default: 0.1)
             json_input (str, optional): Path to a JSON file or directory with pre-computed keypoints.
+            accuracy_threshold_cm (float, optional): Threshold in cm to determine a True Positive for precision/recall calculation.
         """
         # --- Task Generation ---
         tasks = []
@@ -460,7 +462,8 @@ class ImageDepthPoseInference:
         
         # Use AnalysisReporter to generate the report
         self.reporter.save_results_and_statistics(
-            all_results, results_dir, dataset_name, analysis_output_path, trim_ratio
+            all_results, results_dir, dataset_name, analysis_output_path, trim_ratio,
+            accuracy_threshold_cm=accuracy_threshold_cm
         )
         
         print(f"Processing complete! Results saved in '{results_dir}'")
@@ -497,10 +500,10 @@ def main():
     parser.add_argument('--window_size', type=int, default=5, help='The window size for the anomaly detector. Set to -1 for global, 0 for cumulative, >0 for sliding window.')
     parser.add_argument('--trim', type=float, default=0.1, help='Trim ratio for statistical calculations (e.g., 0.1 for 10%% trim from each end).')
     parser.add_argument('--json', type=str, default=None, help='Path to a JSON file or directory with pre-computed keypoints. If provided, model inference is skipped.')
+    parser.add_argument('--accuracy-threshold', type=float, default=5.0, help='Threshold in cm to determine a True Positive for precision/recall calculation.')
 
     args = parser.parse_args()
     
-    # Ground Truth 데이터 로드 또는 설정
     ground_truth_data = ImageDepthPoseInference.GROUND_TRUTH_CM
     if args.use_custom_range_gt:
         print("Using custom range-based GT defined in the code.")
@@ -536,7 +539,8 @@ def main():
         png_depth_dir=args.png_depth_dir,
         details=args.details,
         trim_ratio=args.trim,
-        json_input=args.json
+        json_input=args.json,
+        accuracy_threshold_cm=args.accuracy_threshold
     )
 
 if __name__ == '__main__':

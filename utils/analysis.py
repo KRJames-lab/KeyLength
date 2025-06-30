@@ -2,6 +2,7 @@ import numpy as np
 import os
 import sys
 from typing import List, Dict
+from collections import defaultdict
 
 from .visualization_analysis import save_boxplot, save_histogram, save_framewise_plot
 
@@ -22,7 +23,7 @@ class Analysis:
         self.GROUND_TRUTH_CM = ground_truth_cm
         self.keypoint_names = keypoint_names
 
-    def save_results_and_statistics(self, results: List[Dict], results_dir: str, dataset_name: str, output_path: str, trim_ratio: float):
+    def save_results_and_statistics(self, results: List[Dict], results_dir: str, dataset_name: str, output_path: str, trim_ratio: float, accuracy_threshold_cm: float = 5.0):
         """Save results and print statistics, and save boxplot/scatterplot visualizations"""
         # Redirect stdout to file
         original_stdout = sys.stdout
@@ -38,7 +39,7 @@ class Analysis:
             print(f"   - Valid Frames: {valid_frames}")
             print(f"   - Success Rate: {valid_frames/total_frames*100:.1f}%")
             
-            self._print_distance_statistics_cm(results, trim_ratio)
+            self._print_distance_statistics_cm(results, trim_ratio, accuracy_threshold_cm)
             self._print_keypoint_depth_statistics_cm(results, trim_ratio)
         # Restore stdout
         sys.stdout = original_stdout
@@ -120,18 +121,56 @@ class Analysis:
         
         return trimmed_mean, trimmed_std, min_val, max_val
 
-    def _print_distance_statistics_cm(self, results: List[Dict], trim_ratio: float):
-        """Print skeleton connection distance statistics and calculate MAE, RMSE, MAPE against ground truth"""
+    def _print_distance_statistics_cm(self, results: List[Dict], trim_ratio: float, accuracy_threshold_cm: float = 5.0):
+        """
+        Print skeleton connection distance statistics and calculate MAE, RMSE, MAPE, Precision, and Recall against ground truth.
+        - accuracy_threshold_cm: Threshold in cm to determine a True Positive.
+        """
         # Use COCO_CONNECTIONS order
         mae_dict, rmse_dict, mape_dict = {}, {}, {}
+        tp_dict, fp_dict, fn_dict = defaultdict(int), defaultdict(int), defaultdict(int)
+
         # Use COCO_CONNECTIONS for order and label
         all_distances = {}
         for result in results:
+            # --- Precision/Recall Calculation ---
+            present_connections = result['distances_meters'].keys()
+            for c in self.COCO_CONNECTIONS:
+                connection_key = c["key"]
+                gt = self.GROUND_TRUTH_CM.get(connection_key)
+                if gt is None:
+                    continue
+
+                # Convert string key "s-e" to tuple (s,e) for matching
+                start_str, end_str = connection_key.split('-')
+                pred_key = f"{int(start_str)}-{int(end_str)}"
+
+                if pred_key in present_connections:
+                    pred_dist_cm = result['distances_meters'][pred_key] * 100.0
+                    
+                    is_true_positive = False
+                    if isinstance(gt, list):
+                        if gt[0] <= pred_dist_cm <= gt[1]:
+                            is_true_positive = True
+                    else:
+                        error = abs(pred_dist_cm - gt)
+                        if error <= accuracy_threshold_cm:
+                            is_true_positive = True
+                    
+                    if is_true_positive:
+                        tp_dict[connection_key] += 1
+                    else:
+                        fp_dict[connection_key] += 1
+                else:
+                    fn_dict[connection_key] += 1
+
+            # --- Existing Distance Statistics Calculation ---
             for connection_key, distance in result['distances_meters'].items():
                 if distance > 0:
                     if connection_key not in all_distances:
                         all_distances[connection_key] = []
                     all_distances[connection_key].append(distance * 100.0)  # Convert to cm
+
         print(f"\nSkeleton Connection Distance Statistics (centimeter units):")
         print("-" * 60)
         print(f"{trim_ratio * 2 * 100:.0f}% trimmed is applied")
@@ -202,11 +241,20 @@ class Analysis:
                     # Count the number of frames with APE over 200%
                     ape = abs_err / gt * 100 if gt != 0 else np.zeros_like(abs_err)
                     over_200_count = int(np.sum(ape > 200))
+
+                # Calculate Precision and Recall for the connection
+                tp = tp_dict[connection_key]
+                fp = fp_dict[connection_key]
+                fn = fn_dict[connection_key]
+                precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+                recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+
+                print(f"   MAE: {mae:.2f}cm, MAPE: {mape:.2f}%({over_200_count}), RMSE: {rmse:.2f}cm")
+                print(f"   Precision: {precision:.2%}, Recall: {recall:.2%} (TP:{tp}, FP:{fp}, FN:{fn})")
             else:
                 mae = rmse = mape = 0.0
                 over_200_count = 0
 
-            print(f"   MAE: {mae:.2f}cm, MAPE: {mape:.2f}%({over_200_count}), RMSE: {rmse:.2f}cm")
             mae_dict[connection_key] = mae
             rmse_dict[connection_key] = rmse
             mape_dict[connection_key] = mape
@@ -218,8 +266,17 @@ class Analysis:
         all_rmse = np.mean(list(rmse_dict.values()))
         all_mape = np.mean(list(mape_dict.values()))
         total_over_200 = sum(over_200_counts.values())
+
+        # Calculate Overall Precision and Recall
+        total_tp = sum(tp_dict.values())
+        total_fp = sum(fp_dict.values())
+        total_fn = sum(fn_dict.values())
+        overall_precision = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0.0
+        overall_recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0.0
+
         print("Overall Connection Average Error:")
         print(f"   MAE: {all_mae:.2f}cm, MAPE: {all_mape:.2f}%({total_over_200}), RMSE: {all_rmse:.2f}cm")
+        print(f"   Overall Precision: {overall_precision:.2%}, Recall: {overall_recall:.2%} (TP:{total_tp}, FP:{total_fp}, FN:{total_fn})")
 
     def _print_keypoint_depth_statistics_cm(self, results: List[Dict], trim_ratio: float):
         """Print keypoint depth statistics (in centimeter units)"""

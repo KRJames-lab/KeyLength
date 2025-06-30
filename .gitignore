@@ -16,5 +16,5 @@
 !/output/compare/bar/
 /output/compare/radar/*
 !/output/compare/radar/
-!/output/compare/bar/Left_Shoulder-Left_Elbow_bar_example.png
-!/output/compare/radar/Left_Shoulder-Left_Elbow_radar_example.png
+!/output/compare/bar/Bar_example.png
+!/output/compare/radar/Radar_example.png

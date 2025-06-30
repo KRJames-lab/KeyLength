@@ -76,6 +76,8 @@ The **analysis.out** file includes detailed statistical analysis:
   - MAE
   - RMSE
   - MAPE
+  - Precision
+  - Recall
 
 **Frameplot Example**  
 ![Frameplot example](./output/frameplot_1-3.png)
@@ -86,7 +88,7 @@ Use [output/compare_analysis.py](./output/compare_analysis.py) to compare multip
 - **Radar Graph**: Normalized radar chart for visualizing performance metrics of each skeleton connection
 
 **Bar example**
-![Bar example](./output/compare/bar/Left_Shoulder-Left_Elbow_bar_example.png)
+![Bar example](./output/compare/bar/Bar_example.png)
 
 *All results are saved in the `output` directory, with separate subdirectories created for each experiment.*
 ## Args
@@ -104,3 +106,4 @@ Use [output/compare_analysis.py](./output/compare_analysis.py) to compare multip
 | `--use_extension`         | A flag to enable the anomaly detection and correction feature on the calculated distances.                 | `False`              | No       |
 | `--window_size`           | The window size for the anomaly detector. Set to `-1` for global, `0` for cumulative, `>0` for sliding window. | `5`                  | No       |
 | `--json`           | Path to the json file directory which contains keypooint coordinates. Use this argument if already have information about keypoints. | `None`                  | No       |
+| `--accuracy-threshold`    | Threshold in cm to determine a True Positive for precision/recall calculation.                           | `5.0`                | No       |
