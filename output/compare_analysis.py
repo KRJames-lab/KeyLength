@@ -103,7 +103,6 @@ def collect_all_metrics(root_dir, exclude_dirs=None):
 # Visualization
 def plot_bar(df, save_dir):
     os.makedirs(save_dir, exist_ok=True)
-    # 에러 지표와 PR 지표를 각각 저장할 하위 디렉터리 생성
     error_dir = os.path.join(save_dir, 'error')
     pr_dir = os.path.join(save_dir, 'pr')
     os.makedirs(error_dir, exist_ok=True)
@@ -128,8 +127,7 @@ def plot_bar(df, save_dir):
         ax_err1.set_xlabel('Models')
         ax_err1.set_xticks(x)
         ax_err1.set_xticklabels(data.index, rotation=0, ha="center")
-        ax_err1.set_title(f'{skel} - Error Metrics')
-        # 주요/보조 격자 모두 표시하여 더 촘촘한 그리드
+        ax_err1.set_title(f'{skel} - Error')
         ax_err1.grid(True, which='major', linestyle='--', linewidth=0.6, alpha=0.8)
         ax_err1.minorticks_on()
         ax_err1.grid(True, which='minor', linestyle=':', linewidth=0.4, alpha=0.5)
@@ -137,10 +135,8 @@ def plot_bar(df, save_dir):
         ax_err2 = ax_err1.twinx()
         ax_err2.plot(x, data['MAPE'], marker='^', linestyle='-.', label='MAPE', color='C2')
         ax_err2.set_ylabel('MAPE (%)')
-        # 보조 축에도 격자 추가 (MAPE)
-        ax_err2.grid(False)  # 보조 축 격자는 주축과 겹치므로 끔
+        ax_err2.grid(False) 
 
-        # 축 반전(오차가 작을수록 위로 보이도록)
         ax_err1.invert_yaxis()
         ax_err2.invert_yaxis()
 
@@ -158,7 +154,6 @@ def plot_bar(df, save_dir):
         if has_pr and {'Precision', 'Recall'}.issubset(set(data.columns)):
             fig_pr, ax_pr = plt.subplots(figsize=(12, 7))
 
-            # Precision / Recall 전용 플롯 (다른 지표는 포함하지 않도록 명시적으로 컬럼 선택)
             pr_data = data[['Precision', 'Recall']]
             ax_pr.plot(x, pr_data['Precision'], marker='d', linestyle='--', label='Precision', color='C3')
             ax_pr.plot(x, pr_data['Recall'],   marker='x', linestyle='-',  label='Recall',    color='C4')
@@ -167,7 +162,6 @@ def plot_bar(df, save_dir):
             ax_pr.set_xticks(x)
             ax_pr.set_xticklabels(data.index, rotation=0, ha="center")
             ax_pr.set_title(f'{skel} - Precision / Recall')
-            # 주요/보조 격자 모두 표시하여 더 촘촘하게
             ax_pr.grid(True, which='major', linestyle='--', linewidth=0.6, alpha=0.8)
             ax_pr.minorticks_on()
             ax_pr.grid(True, which='minor', linestyle=':', linewidth=0.4, alpha=0.5)
@@ -243,7 +237,6 @@ def main():
     df = df.sort_index()
     df = df.unstack('Skeleton')
 
-    # 사용자 지정 순서 적용
     if args.order:
         specified = [d for d in args.order if d in df.index]
         if len(specified) < len(args.order):
