@@ -95,7 +95,7 @@ Use [output/compare_analysis.py](./output/compare_analysis.py) to compare multip
 - **Radar Graph**: Normalized radar chart for visualizing performance metrics of each skeleton connection
 
 **Bar example**
-![Bar example](./output/compare/bar/Bar_example.png)
+![Bar example](./output/compare/line/Line_example.png)
 
 *All results are saved in the `output` directory, with separate subdirectories created for each experiment.*
 ## Args

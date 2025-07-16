@@ -15,9 +15,9 @@ command.txt
 !/output/histogram_1-3.png
 
 !/output/compare/
-/output/compare/bar/*
-!/output/compare/bar/
+/output/compare/line/*
+!/output/compare/line/
 /output/compare/radar/*
 !/output/compare/radar/
-!/output/compare/bar/Bar_example.png
+!/output/compare/line/Line_example.png
 !/output/compare/radar/Radar_example.png
