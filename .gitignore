@@ -1,6 +1,9 @@
 /align/bag/
 /datasets/
 /onnx/
+/pth/
+/font/
+command.txt
 
 # output
 /output/*

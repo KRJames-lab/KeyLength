@@ -2,6 +2,10 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import matplotlib.font_manager as fm
+
+plt.rcParams['font.family'] = 'Times New Roman'
+plt.rcParams['font.size'] = 8
 
 
 def save_boxplot(errors_dict, output_dir, title_prefix=""):

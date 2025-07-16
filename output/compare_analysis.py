@@ -9,6 +9,9 @@ from matplotlib.patches import Patch
 from math import pi
 import argparse
 
+plt.rcParams['font.family'] = 'Times New Roman'
+plt.rcParams['font.size'] = 8
+
 # Find analysis.out
 def find_analysis_out_files(root_dir):
     analysis_files = []
